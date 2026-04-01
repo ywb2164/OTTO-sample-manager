@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #0f0f17;
+  color: #fff;
+  overflow: hidden;
+}
+
+/* 允许拖拽的区域 */
+.titlebar-drag-region {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+/* 标题栏内的按钮（如关闭、最小化）必须设为 no-drag，否则无法点击 */
+.titlebar-drag-region button,
+.titlebar-drag-region input,
+.titlebar-drag-region .no-drag {
+  -webkit-app-region: no-drag;
+}
