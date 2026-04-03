@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import React, { Suspense, useEffect, useCallback, useMemo, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { v4 as uuidv4 } from 'uuid'
