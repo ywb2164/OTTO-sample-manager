@@ -20,7 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showInExplorer: (filePath: string) => ipcRenderer.send('show-in-explorer', filePath),
   
   // 拖拽
-  dragOutFiles: (filePaths: string[]) => ipcRenderer.send('drag-out-files', filePaths),
+  dragOutFiles: (items: Array<{ id: string; filePath: string }>) => ipcRenderer.send('drag-out-files', items),
   
   // 持久化存储
   storeGet: (key: string) => ipcRenderer.invoke('store-get', key),
@@ -35,6 +35,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
 // TypeScript类型声明
 declare global {
+  interface ScannedFolderNode {
+    name: string
+    path: string
+    files: string[]
+    children: ScannedFolderNode[]
+  }
+
   interface Window {
     electronAPI: {
       closeWindow: () => void
@@ -45,11 +52,11 @@ declare global {
       setOpacity: (value: number) => void
       openFileDialog: () => Promise<string[]>
       openFolderDialog: () => Promise<string | null>
-      scanFolder: (folderPath: string) => Promise<string[]>
+      scanFolder: (folderPath: string) => Promise<ScannedFolderNode | null>
       getFileInfo: (filePath: string) => Promise<{ exists: boolean; fileSize: number }>
       validateFiles: (filePaths: string[]) => Promise<{ path: string; valid: boolean }[]>
       showInExplorer: (filePath: string) => void
-      dragOutFiles: (filePaths: string[]) => void
+      dragOutFiles: (items: Array<{ id: string; filePath: string }>) => void
       storeGet: (key: string) => Promise<unknown>
       storeSet: (key: string, value: unknown) => void
       storeDelete: (key: string) => void

@@ -1,7 +1,15 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import { join } from 'path'
-import { existsSync, statSync } from 'fs'
+import { existsSync, readdirSync, statSync } from 'fs'
 import Store from 'electron-store'
+import { cleanupManagedCopies, createManagedCopy } from './copyManager'
+
+interface ScannedFolderNode {
+  name: string
+  path: string
+  files: string[]
+  children: ScannedFolderNode[]
+}
 
 // ------------------------------
 // electron-store 初始化
@@ -11,6 +19,10 @@ const store = new Store({
   defaults: {
     samples: {},
     groups: {},
+    copySettings: {
+      enableAutoCopy: true,
+      keepCopies: false,
+    },
     settings: {
       windowAlwaysOnTop: true,
       windowOpacity: 1.0,
@@ -86,6 +98,17 @@ app.whenReady().then(() => {
   })
 })
 
+app.on('before-quit', async () => {
+  const copySettings = (store.get('copySettings') as { enableAutoCopy?: boolean; keepCopies?: boolean } | undefined) ?? {}
+  if (copySettings.keepCopies) return
+
+  try {
+    await cleanupManagedCopies()
+  } catch {
+    // 清理失败时不阻塞退出
+  }
+})
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
@@ -145,32 +168,42 @@ ipcMain.handle('dialog-open-folder', async () => {
   return result.canceled ? null : result.filePaths[0]
 })
 
-// 递归扫描文件夹中的音频文件
+// 扫描文件夹结构，保留根目录与层级
 ipcMain.handle('scan-folder', async (_, folderPath: string) => {
   const audioExts = ['.wav', '.mp3', '.ogg', '.flac', '.aiff', '.aif', '.m4a']
-  const results: string[] = []
-  
-  function scanDir(dir: string) {
-    const { readdirSync } = require('fs')
-    const { join: pathJoin, extname } = require('path')
-    
+
+  function scanDir(dir: string): ScannedFolderNode | null {
     try {
       const entries = readdirSync(dir, { withFileTypes: true })
+      const node: ScannedFolderNode = {
+        name: dir.replace(/\\/g, '/').split('/').pop() || dir,
+        path: dir,
+        files: [],
+        children: [],
+      }
+
       for (const entry of entries) {
-        const fullPath = pathJoin(dir, entry.name)
+        const fullPath = join(dir, entry.name)
         if (entry.isDirectory()) {
-          scanDir(fullPath)
-        } else if (audioExts.includes(extname(entry.name).toLowerCase())) {
-          results.push(fullPath)
+          const child = scanDir(fullPath)
+          if (child) {
+            node.children.push(child)
+          }
+        } else {
+          const ext = entry.name.includes('.') ? `.${entry.name.split('.').pop()?.toLowerCase()}` : ''
+          if (audioExts.includes(ext)) {
+            node.files.push(fullPath)
+          }
         }
       }
+
+      return node
     } catch (e) {
-      // 跳过无权限目录
+      return null
     }
   }
-  
-  scanDir(folderPath)
-  return results
+
+  return scanDir(folderPath)
 })
 
 // 获取文件基础信息（不解码，只读元数据）
@@ -199,21 +232,46 @@ ipcMain.on('show-in-explorer', (_, filePath: string) => {
 // ------------------------------
 // 原生文件拖拽（核心功能）
 // ------------------------------
-ipcMain.on('drag-out-files', (event, filePaths: string[]) => {
+ipcMain.on('drag-out-files', async (event, items: Array<{ id: string; filePath: string }>) => {
   // 验证所有文件存在
-  const validPaths = filePaths.filter(p => existsSync(p))
-  if (validPaths.length === 0) return
+  const validItems = items.filter(item => existsSync(item.filePath))
+  if (validItems.length === 0) return
+
+  const copySettings = (store.get('copySettings') as { enableAutoCopy?: boolean; keepCopies?: boolean } | undefined) ?? {}
+  const enableAutoCopy = copySettings.enableAutoCopy ?? true
+
+  const preparedItems = enableAutoCopy
+    ? await Promise.all(
+        validItems.map(async (item) => {
+          try {
+            const copyRecord = await createManagedCopy(item)
+            return {
+              ...item,
+              targetPath: copyRecord.filePath
+            }
+          } catch {
+            return null
+          }
+        })
+      )
+    : validItems.map((item) => ({
+        ...item,
+        targetPath: item.filePath
+      }))
+
+  const availableItems = preparedItems.filter((item): item is { id: string; filePath: string; targetPath: string } => item !== null)
+  if (availableItems.length === 0) return
 
   const iconPath = app.isPackaged
     ? join(process.resourcesPath, 'resources/drag-icon.png')
     : join(__dirname, '../../resources/drag-icon.png')
 
-  const startDragOptions: any = { file: validPaths[0] }
+  const startDragOptions: any = { file: availableItems[0].targetPath }
   if (existsSync(iconPath) && iconPath.endsWith('.png')) {
     startDragOptions.icon = iconPath
   }
 
-  if (validPaths.length === 1) {
+  if (availableItems.length === 1) {
     event.sender.startDrag(startDragOptions)
   } else {
     // Electron's startDrag only officially supports dragging a single file via the `file` property.

@@ -12,7 +12,66 @@ import { StatusBar } from '@/components/StatusBar/StatusBar'
 import { useSampleStore } from '@/store/sampleStore'
 import { usePlayerStore } from '@/store/playerStore'
 import { useAudioEngine } from '@/hooks/useAudioEngine'
-import { Sample } from '@/types'
+import { Sample, SampleFolder, ScannedFolderNode, StoredFolderState } from '@/types'
+
+function getFileNameParts(filePath: string) {
+  const pathParts = filePath.replace(/\\/g, '/').split('/')
+  const fullFileName = pathParts[pathParts.length - 1]
+  const dotIndex = fullFileName.lastIndexOf('.')
+
+  return {
+    fileName: dotIndex > 0 ? fullFileName.substring(0, dotIndex) : fullFileName,
+    fileExt: dotIndex > 0 ? fullFileName.substring(dotIndex) : '',
+  }
+}
+
+function buildStructuredFolders(root: ScannedFolderNode) {
+  const folders: SampleFolder[] = []
+  const rootFolderIds: string[] = []
+
+  const walk = (
+    node: ScannedFolderNode,
+    parentId: string | null,
+    rootId: string,
+    depth: number,
+    importedAt: number,
+  ): string => {
+    const normalizedPath = node.path.replace(/\\/g, '/')
+    const folderId = `folder_${normalizedPath}`
+    const childFolderIds = node.children.map((child) => `folder_${child.path.replace(/\\/g, '/')}`)
+
+    folders.push({
+      id: folderId,
+      name: node.name,
+      path: normalizedPath,
+      sampleIds: [],
+      childFolderIds,
+      parentId,
+      rootId,
+      depth,
+      importedAt,
+      isExpanded: false,
+      order: 0,
+      isRenaming: false,
+    })
+
+    if (parentId === null) {
+      rootFolderIds.push(folderId)
+    }
+
+    node.children.forEach((child) => {
+      walk(child, folderId, rootId, depth + 1, importedAt)
+    })
+
+    return folderId
+  }
+
+  const importedAt = Date.now()
+  const rootId = `folder_${root.path.replace(/\\/g, '/')}`
+  walk(root, null, rootId, 0, importedAt)
+
+  return { folders, rootFolderIds, importedAt }
+}
 
 const SelectionBar = React.lazy(() =>
   import('@/components/SelectionBar').then((module) => ({ default: module.SelectionBar }))
@@ -20,23 +79,30 @@ const SelectionBar = React.lazy(() =>
 
 export default function App() {
   const listRef = React.useRef<HTMLDivElement>(null)
+  const selectAllRef = React.useRef<HTMLInputElement>(null)
   
   const {
     samples, selectedIds,
-    addSamples, setDecodeProgress,
+    addSamples, importStructuredData, restoreFolders, removeAllImported, setDecodeProgress,
     toggleSelected, clearSelection, selectAll,
     setAnchorId, setSelected,
-    toggleFolderExpanded, renameFolder, removeFolder, moveFolder,
-    folders, expandedFolderIds
+    toggleFolderExpanded, renameFolder, removeFolder, moveFolder, getOrderedIds,
+    folders, folderOrder, expandedFolderIds
   } = useSampleStore()
 
   const { currentSampleId, isPlaying } = usePlayerStore()
   const { play, togglePause, seekTo, preDecodeAll, getWaveform } = useAudioEngine()
   const folderSettings = useSampleStore(state => state.folderSettings)
-  const showSelectionBar = useSampleStore(state => state.showSelectionBar)
   const groups = useSampleStore(state => state.groups)
 
   const [currentWaveform, setCurrentWaveform] = useState<Float32Array | null>(null)
+  const [hasHydratedStore, setHasHydratedStore] = useState(false)
+
+  const orderedIds = getOrderedIds()
+  const selectableCount = orderedIds.length
+  const selectedVisibleCount = orderedIds.filter(id => selectedIds.has(id)).length
+  const isAllSelected = selectableCount > 0 && selectedVisibleCount === selectableCount
+  const isPartiallySelected = selectedVisibleCount > 0 && selectedVisibleCount < selectableCount
 
   // 虚拟列表
   const flattenedItems = useSampleStore(state => {
@@ -52,22 +118,58 @@ export default function App() {
     overscan: 10,
   })
 
-  // ------------------------------
-  // 数据持久化：启动时恢复
-  // ------------------------------
   useEffect(() => {
-    const restore = async () => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = isPartiallySelected
+    }
+  }, [isPartiallySelected])
+
+  useEffect(() => {
+    const hydrateStore = async () => {
       const storedSamples = await window.electronAPI.storeGet('samples') as Record<string, any> | null
-      if (!storedSamples) return
+      const storedFolderState = await window.electronAPI.storeGet('folderState') as StoredFolderState | null
+      const storedSettings = await window.electronAPI.storeGet('folderSettings') as any
+      const storedGroups = await window.electronAPI.storeGet('groups') as Record<string, any> | null
+
+      if (storedSettings) {
+        const { setExpandOnSearch, setFolderClassificationEnabled } = useSampleStore.getState()
+        if (storedSettings.expandOnSearch !== undefined) {
+          setExpandOnSearch(storedSettings.expandOnSearch)
+        }
+        if (storedSettings.folderClassificationEnabled !== undefined) {
+          setFolderClassificationEnabled(storedSettings.folderClassificationEnabled)
+        }
+      }
+
+      if (storedGroups) {
+        const { addGroup, groups } = useSampleStore.getState()
+        if (groups.size === 0) {
+          Object.values(storedGroups).forEach((group: any) => {
+            addGroup(group)
+          })
+        }
+      }
+
+      if (!storedSamples) {
+        setHasHydratedStore(true)
+        return
+      }
 
       const sampleList: Sample[] = Object.values(storedSamples).map(s => ({
         ...s,
+        folderId: s.folderId ?? null,
+        originalId: s.originalId ?? s.id,
+        isCopy: s.isCopy ?? false,
+        copyIndex: s.copyIndex ?? 0,
         waveformData: s.waveformData ? new Float32Array(s.waveformData) : undefined,
         isDecoded: false,
         isFileValid: true,  // 先假设有效，后面验证
       }))
 
-      if (sampleList.length === 0) return
+      if (sampleList.length === 0) {
+        setHasHydratedStore(true)
+        return
+      }
 
       // 验证文件是否仍然存在
       const validationResult = await window.electronAPI.validateFiles(
@@ -80,7 +182,12 @@ export default function App() {
         isFileValid: validationMap.get(s.filePath) ?? false
       }))
 
-      addSamples(validatedSamples)
+      if (storedFolderState?.folders && storedFolderState.folderOrder) {
+        restoreFolders(Object.values(storedFolderState.folders), storedFolderState.folderOrder)
+        addSamples(validatedSamples)
+      } else {
+        addSamples(validatedSamples)
+      }
 
       // 后台预解码有效文件
       const validSamples = validatedSamples.filter(s => s.isFileValid)
@@ -88,56 +195,22 @@ export default function App() {
         validSamples.map(s => ({ id: s.id, filePath: s.filePath })),
         (current, total) => setDecodeProgress({ current, total })
       ).then(() => setDecodeProgress(null))
+
+      setHasHydratedStore(true)
     }
 
-    restore()
-  }, [])
+    hydrateStore().catch(() => {
+      setHasHydratedStore(true)
+      setDecodeProgress(null)
+      useSampleStore.getState().setIsImporting(false)
+    })
+  }, [addSamples, preDecodeAll, restoreFolders, setDecodeProgress])
 
-  // ------------------------------
-  // 持久化：恢复设置
-  // ------------------------------
   useEffect(() => {
-    const restoreSettings = async () => {
-      const storedSettings = await window.electronAPI.storeGet('folderSettings') as any
-      if (!storedSettings) return
-
-      const { setExpandOnSearch, setFolderClassificationEnabled } = useSampleStore.getState()
-      if (storedSettings.expandOnSearch !== undefined) {
-        setExpandOnSearch(storedSettings.expandOnSearch)
-      }
-      if (storedSettings.folderClassificationEnabled !== undefined) {
-        setFolderClassificationEnabled(storedSettings.folderClassificationEnabled)
-      }
+    if (!hasHydratedStore) {
+      return
     }
-    restoreSettings()
-  }, [])
 
-  // ------------------------------
-  // 持久化：恢复分组
-  // ------------------------------
-  useEffect(() => {
-    const restoreGroups = async () => {
-      const storedGroups = await window.electronAPI.storeGet('groups') as Record<string, any> | null
-      if (!storedGroups) return
-
-      const { addGroup } = useSampleStore.getState()
-      // 清空现有分组（如果有的话）
-      const { groups } = useSampleStore.getState()
-      if (groups.size > 0) {
-        return
-      }
-      // 添加所有分组
-      Object.values(storedGroups).forEach((group: any) => {
-        addGroup(group)
-      })
-    }
-    restoreGroups()
-  }, [])
-
-  // ------------------------------
-  // 持久化：保存到store
-  // ------------------------------
-  useEffect(() => {
     const samplesToSave: Record<string, any> = {}
     for (const [id, sample] of samples) {
       samplesToSave[id] = {
@@ -148,26 +221,46 @@ export default function App() {
         isFileValid: true,
       }
     }
-    window.electronAPI.storeSet('samples', samplesToSave)
-  }, [samples])
 
-  // ------------------------------
-  // 持久化：保存分组
-  // ------------------------------
+    window.electronAPI.storeSet('samples', samplesToSave)
+  }, [hasHydratedStore, samples])
+
   useEffect(() => {
+    if (!hasHydratedStore) {
+      return
+    }
+
+    const folderState: StoredFolderState = {
+      folders: {},
+      folderOrder,
+    }
+
+    for (const [id, folder] of folders) {
+      folderState.folders[id] = folder
+    }
+
+    window.electronAPI.storeSet('folderState', folderState)
+  }, [folders, folderOrder, hasHydratedStore])
+
+  useEffect(() => {
+    if (!hasHydratedStore) {
+      return
+    }
+
     const groupsToSave: Record<string, any> = {}
     for (const [id, group] of groups) {
       groupsToSave[id] = group
     }
     window.electronAPI.storeSet('groups', groupsToSave)
-  }, [groups])
+  }, [groups, hasHydratedStore])
 
-  // ------------------------------
-  // 持久化：保存设置
-  // ------------------------------
   useEffect(() => {
+    if (!hasHydratedStore) {
+      return
+    }
+
     window.electronAPI.storeSet('folderSettings', folderSettings)
-  }, [folderSettings])
+  }, [folderSettings, hasHydratedStore])
 
   // ------------------------------
   // 导入文件
@@ -178,43 +271,40 @@ export default function App() {
 
     const ctx = new AudioContext()
     const newSamples: Sample[] = []
+    const existingFilePaths = new Set(Array.from(useSampleStore.getState().samples.values()).map(sample => sample.filePath))
+    const targetGroupId = useSampleStore.getState().activeGroupId
 
     for (const filePath of filePaths) {
-      // 检查是否已导入（路径去重）
-      const alreadyImported = [...samples.values()].some(s => s.filePath === filePath)
-      if (alreadyImported) continue
+      if (existingFilePaths.has(filePath)) continue
 
       try {
-        const fileInfo = await window.electronAPI.getFileInfo(filePath)
-        if (!fileInfo.exists) continue
-
-        // 读取文件解码获取时长等元数据
         const arrayBuffer = await window.electronAPI.readFileAsBuffer(filePath)
         const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
+        const { fileName, fileExt } = getFileNameParts(filePath)
 
-        // 提取文件名
-        const pathParts = filePath.replace(/\\/g, '/').split('/')
-        const fullFileName = pathParts[pathParts.length - 1]
-        const dotIndex = fullFileName.lastIndexOf('.')
-        const fileName = dotIndex > 0 ? fullFileName.substring(0, dotIndex) : fullFileName
-        const fileExt = dotIndex > 0 ? fullFileName.substring(dotIndex) : ''
+        const sampleId = uuidv4()
 
         const sample: Sample = {
-          id: uuidv4(),
+          id: sampleId,
           fileName,
           fileExt,
           filePath,
+          folderId: null,
+          originalId: sampleId,
+          isCopy: false,
+          copyIndex: 0,
           duration: audioBuffer.duration,
           sampleRate: audioBuffer.sampleRate,
           channels: audioBuffer.numberOfChannels,
-          fileSize: fileInfo.fileSize,
-          groupIds: [],
+          fileSize: arrayBuffer.byteLength,
+          groupIds: targetGroupId ? [targetGroupId] : [],
           importedAt: Date.now(),
           isDecoded: true,
           isFileValid: true,
         }
 
         newSamples.push(sample)
+        existingFilePaths.add(filePath)
       } catch (e) {
         console.error(`导入失败: ${filePath}`, e)
       }
@@ -229,7 +319,7 @@ export default function App() {
       newSamples.map(s => ({ id: s.id, filePath: s.filePath })),
       (current, total) => setDecodeProgress({ current, total })
     ).then(() => setDecodeProgress(null))
-  }, [samples, addSamples, preDecodeAll])
+  }, [addSamples, preDecodeAll, setDecodeProgress])
 
   const handleImportFiles = useCallback(async () => {
     const paths = await window.electronAPI.openFileDialog()
@@ -239,9 +329,95 @@ export default function App() {
   const handleImportFolder = useCallback(async () => {
     const folder = await window.electronAPI.openFolderDialog()
     if (!folder) return
-    const paths = await window.electronAPI.scanFolder(folder)
-    await importFiles(paths)
-  }, [importFiles])
+    const scannedRoot = await window.electronAPI.scanFolder(folder)
+    if (!scannedRoot) return
+
+    useSampleStore.getState().setIsImporting(true)
+    const ctx = new AudioContext()
+    const { folders: builtFolders, rootFolderIds } = buildStructuredFolders(scannedRoot)
+    const folderMap = new Map(builtFolders.map(folderItem => [folderItem.path, folderItem]))
+    const existingFilePaths = new Set(Array.from(useSampleStore.getState().samples.values()).map(sample => sample.filePath))
+    const targetGroupId = useSampleStore.getState().activeGroupId
+    const newSamples: Sample[] = []
+
+    const collectFiles = (node: ScannedFolderNode): string[] => [
+      ...node.files,
+      ...node.children.flatMap(collectFiles),
+    ]
+
+    try {
+      for (const filePath of collectFiles(scannedRoot)) {
+        if (existingFilePaths.has(filePath)) continue
+
+        try {
+          const arrayBuffer = await window.electronAPI.readFileAsBuffer(filePath)
+          const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
+          const { fileName, fileExt } = getFileNameParts(filePath)
+          const sampleId = uuidv4()
+          const folderPath = filePath.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
+          const parentFolder = folderMap.get(folderPath)
+
+          const sample: Sample = {
+            id: sampleId,
+            fileName,
+            fileExt,
+            filePath,
+            folderId: parentFolder?.id ?? null,
+            originalId: sampleId,
+            isCopy: false,
+            copyIndex: 0,
+            duration: audioBuffer.duration,
+            sampleRate: audioBuffer.sampleRate,
+            channels: audioBuffer.numberOfChannels,
+            fileSize: arrayBuffer.byteLength,
+            groupIds: targetGroupId ? [targetGroupId] : [],
+            importedAt: Date.now(),
+            isDecoded: true,
+            isFileValid: true,
+          }
+
+          newSamples.push(sample)
+          if (parentFolder) {
+            parentFolder.sampleIds.push(sampleId)
+          }
+          existingFilePaths.add(filePath)
+        } catch (error) {
+          console.error(`导入失败: ${filePath}`, error)
+        }
+      }
+
+      importStructuredData({
+        samples: newSamples,
+        folders: builtFolders,
+        rootFolderIds,
+        targetGroupId,
+      })
+
+      preDecodeAll(
+        newSamples.map(s => ({ id: s.id, filePath: s.filePath })),
+        (current, total) => setDecodeProgress({ current, total })
+      ).then(() => setDecodeProgress(null))
+    } finally {
+      ctx.close()
+      useSampleStore.getState().setIsImporting(false)
+    }
+  }, [importStructuredData, preDecodeAll, setDecodeProgress])
+
+  const handleRemoveAllImported = useCallback(() => {
+    const confirmed = window.confirm('确定移除当前导入的全部文件夹和素材吗？\n这不会删除磁盘上的原始文件。')
+    if (!confirmed) return
+
+    removeAllImported()
+    setCurrentWaveform(null)
+
+    const playerStore = usePlayerStore.getState()
+    playerStore.setCurrentSampleId(null)
+    playerStore.setCurrentFilePath(null)
+    playerStore.setIsPlaying(false)
+    playerStore.setCurrentTime(0)
+    playerStore.setDuration(0)
+    window.electronAPI.storeDelete('folderState')
+  }, [removeAllImported])
 
   // 拖文件到窗口导入
   const handleWindowDrop = useCallback((e: React.DragEvent) => {
@@ -268,12 +444,13 @@ export default function App() {
     // 弹出确认对话框
     const folder = folders.get(folderId)
     if (!folder) return
-    const confirmed = window.confirm(`确定删除文件夹 "${folder.name}" 及其中的 ${folder.sampleIds.length} 个样本吗？`)
+    const folderSamples = useSampleStore.getState().getFolderSamples(folderId)
+    const confirmed = window.confirm(`确定删除文件夹 "${folder.name}" 及其中的 ${folderSamples.length} 个样本吗？`)
     if (confirmed) {
       removeFolder(folderId)
       // 同时删除文件夹内的所有样本
       const { removeSamples } = useSampleStore.getState()
-      removeSamples(folder.sampleIds)
+      removeSamples(folderSamples.map(sample => sample.id))
     }
   }, [folders, removeFolder])
 
@@ -327,6 +504,14 @@ export default function App() {
     }
   }, [seekTo])
 
+  const handleToggleSelectAll = useCallback(() => {
+    if (isAllSelected) {
+      clearSelection()
+    } else {
+      selectAll()
+    }
+  }, [clearSelection, isAllSelected, selectAll])
+
 
   // ------------------------------
   // 渲染
@@ -341,6 +526,7 @@ export default function App() {
       <TitleBar
         onImportFiles={handleImportFiles}
         onImportFolder={handleImportFolder}
+        onRemoveAllImported={handleRemoveAllImported}
       />
 
       {/* 搜索栏 */}
@@ -350,10 +536,25 @@ export default function App() {
       <GroupBar />
 
       {/* 多选操作栏（右键菜单触发显示） */}
-      {showSelectionBar && selectedIds.size > 0 && (
+      {selectedIds.size > 0 && (
         <Suspense fallback={null}>
           <SelectionBar />
         </Suspense>
+      )}
+
+      {samples.size > 0 && (
+        <div className="px-3 py-1.5 border-b border-border bg-bg-secondary/60">
+          <label className="flex items-center gap-2 text-xs text-text-primary cursor-pointer w-fit">
+            <input
+              ref={selectAllRef}
+              type="checkbox"
+              checked={isAllSelected}
+              onChange={handleToggleSelectAll}
+              className="w-4 h-4 accent-blue-500"
+            />
+            <span>全选</span>
+          </label>
+        </div>
       )}
 
       {/* 采样列表（虚拟滚动） */}

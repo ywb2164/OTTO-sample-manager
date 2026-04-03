@@ -30,7 +30,7 @@ export const FolderItem: React.FC<Props> = ({
   const [showDeleteButton, setShowDeleteButton] = useState(false)
   const [touchStartX, setTouchStartX] = useState(0)
 
-  const { getFolderSamples, openContextMenu, hiddenFolderIds, setSelected } = useSampleStore()
+  const { getFolderSamples, openContextMenu, hiddenFolderIds, setSelected, selectedIds } = useSampleStore()
 
   // 双击进入重命名模式
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
@@ -160,6 +160,22 @@ export const FolderItem: React.FC<Props> = ({
 
   const folderSamples = getFolderSamples(folder.id)
   const sampleCount = folderSamples.length
+  const folderSampleIds = folderSamples.map(sample => sample.id)
+  const isChecked = folderSampleIds.length > 0 && folderSampleIds.every(id => selectedIds.has(id))
+  const leftPadding = 12 + folder.depth * 16
+
+  const handleCheckboxChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    e.stopPropagation()
+
+    const nextSelectedIds = new Set(selectedIds)
+    if (isChecked) {
+      folderSampleIds.forEach(id => nextSelectedIds.delete(id))
+    } else {
+      folderSampleIds.forEach(id => nextSelectedIds.add(id))
+    }
+
+    setSelected(nextSelectedIds)
+  }, [folderSampleIds, isChecked, selectedIds, setSelected])
 
   return (
     <div
@@ -184,7 +200,17 @@ export const FolderItem: React.FC<Props> = ({
       onDragStart={handleDragStart}
       onDragOver={(e) => onDragOver(e, folder.id)}
       onDrop={(e) => onDrop(e, folder.id)}
+      style={{ paddingLeft: `${leftPadding}px` }}
     >
+      <input
+        type="checkbox"
+        checked={isChecked}
+        onChange={handleCheckboxChange}
+        onClick={(e) => e.stopPropagation()}
+        className="w-4 h-4 flex-shrink-0 accent-blue-500"
+        aria-label={`选择文件夹 ${folder.name}`}
+      />
+
       {/* 展开/收起箭头 */}
       <div className="w-4 h-4 flex-shrink-0 flex items-center justify-center">
         {isExpanded ? (

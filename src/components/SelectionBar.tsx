@@ -13,7 +13,7 @@ export const SelectionBar: React.FC = () => {
   const handleDeleteSelected = () => {
     if (selectedIds.size === 0) return
 
-    const confirmed = window.confirm(`确定删除选中的 ${selectedIds.size} 个样本吗？`)
+    const confirmed = window.confirm(`确定删除选中的 ${selectedIds.size} 个样本吗？文件不会从本地移除`)
     if (confirmed) {
       removeSamples([...selectedIds])
       clearSelection()

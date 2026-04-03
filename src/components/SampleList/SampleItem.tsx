@@ -42,17 +42,27 @@ export const SampleItem: React.FC<Props> = ({
     
     // 如果拖的是选中集合里的一个，则拖出所有选中的
     // 如果拖的不在选中集合里，则只拖这一个
-    let dragPaths: string[]
+    let dragItems: Array<{ id: string; filePath: string }>
     if (selectedIds.has(sample.id) && selectedIds.size > 1) {
       const { samples } = useSampleStore.getState()
-      dragPaths = [...selectedIds]
-        .map(id => samples.get(id)?.filePath)
-        .filter(Boolean) as string[]
+      dragItems = [...selectedIds]
+        .map(id => {
+          const selectedSample = samples.get(id)
+          if (!selectedSample) return null
+          return {
+            id: selectedSample.originalId || selectedSample.id,
+            filePath: selectedSample.filePath
+          }
+        })
+        .filter((item): item is { id: string; filePath: string } => item !== null)
     } else {
-      dragPaths = [sample.filePath]
+      dragItems = [{
+        id: sample.originalId || sample.id,
+        filePath: sample.filePath
+      }]
     }
     
-    window.electronAPI.dragOutFiles(dragPaths)
+    window.electronAPI.dragOutFiles(dragItems)
   }, [sample])
 
   // 右键菜单
@@ -72,6 +82,7 @@ export const SampleItem: React.FC<Props> = ({
   // 检查是否隐藏：样本本身隐藏或其所在文件夹隐藏
   const folder = getFolderForSample(sample.id)
   const isHidden = hiddenSampleIds.has(sample.id) || (folder ? hiddenFolderIds.has(folder.id) : false)
+  const leftPadding = 28 + ((folder?.depth ?? -1) + 1) * 16
 
   const groupNames = sample.groupIds
     .map(gid => groups.get(gid)?.name)
@@ -98,6 +109,7 @@ export const SampleItem: React.FC<Props> = ({
       onContextMenu={handleContextMenu}
       draggable
       onDragStart={handleDragStart}
+      style={{ paddingLeft: `${leftPadding}px` }}
     >
       {/* 选中指示器 */}
       <div className={`

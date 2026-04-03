@@ -3,6 +3,10 @@ export interface Sample {
   fileName: string        // 显示用文件名（不含扩展名）
   fileExt: string         // 扩展名，如 .wav .mp3
   filePath: string        // 完整路径（唯一性依据）
+  folderId?: string | null
+  originalId: string
+  isCopy: boolean
+  copyIndex: number
   duration: number        // 时长（秒）
   sampleRate: number
   channels: number
@@ -26,10 +30,34 @@ export interface SampleFolder {
   id: string
   name: string
   path: string  // 文件夹路径
-  sampleIds: string[]  // 包含的样本ID
+  sampleIds: string[]  // 当前文件夹直接包含的样本ID
+  childFolderIds: string[]
+  parentId: string | null
+  rootId: string
+  depth: number
+  importedAt: number
   isExpanded: boolean  // 是否展开
   order: number  // 排序顺序
   isRenaming: boolean  // 是否正在重命名
+}
+
+export interface ScannedFolderNode {
+  name: string
+  path: string
+  files: string[]
+  children: ScannedFolderNode[]
+}
+
+export interface StructuredImportPayload {
+  samples: Sample[]
+  folders: SampleFolder[]
+  rootFolderIds: string[]
+  targetGroupId: string | null
+}
+
+export interface StoredFolderState {
+  folders: Record<string, SampleFolder>
+  folderOrder: string[]
 }
 
 export interface PlayerState {
@@ -48,9 +76,17 @@ export interface AppSettings {
   expandFoldersOnSearch: boolean
 }
 
+export interface CopySettings {
+  enableAutoCopy: boolean
+  keepCopies: boolean
+}
+
 // IPC通信的类型
 export interface DragStartPayload {
-  filePaths: string[]
+  items: Array<{
+    id: string
+    filePath: string
+  }>
 }
 
 export interface ImportResult {

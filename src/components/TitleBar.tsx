@@ -4,11 +4,14 @@ import { useSampleStore } from '@/store/sampleStore'
 interface Props {
   onImportFiles: () => void
   onImportFolder: () => void
+  onRemoveAllImported: () => void
 }
 
-export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder }) => {
+export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onRemoveAllImported }) => {
   const [alwaysOnTop, setAlwaysOnTop] = useState(true)
   const [opacity, setOpacity] = useState(1.0)
+  const [enableAutoCopy, setEnableAutoCopy] = useState(true)
+  const [keepCopies, setKeepCopies] = useState(false)
   const [showImportMenu, setShowImportMenu] = useState(false)
   const [showSettingsMenu, setShowSettingsMenu] = useState(false)
   const { folderSettings, setExpandOnSearch, setFolderClassificationEnabled } = useSampleStore()
@@ -21,6 +24,20 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder }) => 
     window.electronAPI.getOpacity().then(setOpacity)
   }, [])
 
+  useEffect(() => {
+    const restoreCopySettings = async () => {
+      const storedCopySettings = await window.electronAPI.storeGet('copySettings') as {
+        enableAutoCopy?: boolean
+        keepCopies?: boolean
+      } | null
+      if (!storedCopySettings) return
+      setEnableAutoCopy(storedCopySettings.enableAutoCopy ?? true)
+      setKeepCopies(storedCopySettings.keepCopies ?? false)
+    }
+
+    restoreCopySettings()
+  }, [])
+
   const toggleAlwaysOnTop = () => {
     const next = !alwaysOnTop
     setAlwaysOnTop(next)
@@ -30,6 +47,31 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder }) => 
   const handleOpacityChange = (value: number) => {
     setOpacity(value)
     window.electronAPI.setOpacity(value)
+  }
+
+  const updateCopySettings = (next: { enableAutoCopy?: boolean; keepCopies?: boolean }) => {
+    const nextSettings = {
+      enableAutoCopy,
+      keepCopies,
+      ...next
+    }
+
+    if (next.enableAutoCopy !== undefined) {
+      setEnableAutoCopy(next.enableAutoCopy)
+    }
+    if (next.keepCopies !== undefined) {
+      setKeepCopies(next.keepCopies)
+    }
+
+    window.electronAPI.storeSet('copySettings', nextSettings)
+  }
+
+  const handleEnableAutoCopyChange = (value: boolean) => {
+    updateCopySettings({ enableAutoCopy: value })
+  }
+
+  const handleKeepCopiesChange = (value: boolean) => {
+    updateCopySettings({ keepCopies: value })
   }
 
   return (
@@ -70,6 +112,13 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder }) => 
               >
                 导入文件夹
               </button>
+              <div className="border-t border-border my-1"></div>
+              <button
+                className="block w-full text-left text-xs px-3 py-2 hover:bg-bg-hover text-red-400"
+                onClick={() => { onRemoveAllImported(); setShowImportMenu(false) }}
+              >
+                移除全部导入
+              </button>
             </div>
           )}
         </div>
@@ -102,6 +151,30 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder }) => 
                 />
                 <span>按文件夹分类</span>
               </label>
+              <div className="border-t border-border my-2"></div>
+              <label className="flex items-center gap-2 text-xs text-text-primary cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={enableAutoCopy}
+                  onChange={(e) => handleEnableAutoCopyChange(e.target.checked)}
+                />
+                <span>启用自动副本</span>
+              </label>
+              <div className="text-[11px] text-text-dim mt-1 leading-4">
+                勾选后，单个素材可多次使用且分别独立
+              </div>
+              <div className="border-t border-border my-2"></div>
+              <label className="flex items-center gap-2 text-xs text-text-primary cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={keepCopies}
+                  onChange={(e) => handleKeepCopiesChange(e.target.checked)}
+                />
+                <span>保留自动副本</span>
+              </label>
+              <div className="text-[11px] text-text-dim mt-1 leading-4">
+                关闭时默认清理拖拽生成的外部编辑副本
+              </div>
               <div className="border-t border-border my-2"></div>
               <div className="flex justify-between items-center text-xs text-text-primary w-full gap-2">
                 <span className="whitespace-nowrap">窗口透明度:</span>
