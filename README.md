@@ -1,75 +1,149 @@
-# sample-manager
+# OTTO Sample Manager
 
-An Electron application with React and TypeScript
+一个面向鬼畜 / 人力调音工作流的桌面音频素材管理器。  
+适用于 Melodyne（主）、Vegas、FL Studio 等场景，把常用素材的**导入、预览、整理、拖拽复用, 预解码**，节省加载时间
+作者： b站 @杨薇柏_Official （https://space.bilibili.com/1042301441/） 
+         @_Candace_ （https://space.bilibili.com/364700163）
 
-## Recommended IDE Setup
+---
+（目前并不能确认Melodyne 3是否兼容）
+## 项目特色
 
-- [VSCode](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Prettier](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode)
+制冰时对素材处理的常见问题：
 
-## Project Setup
+- 素材散落在多个文件夹里，整理困难
+- 导入后试听、比对和筛选效率低
+- 频繁拖入 DAW / 调音软件时，工作流中断
+- 重复使用素材时容易弄乱原始文件
+- 一旦素材量变大，界面和响应速度很容易变差
 
-### Install
+OTTO Sample Manager：
 
-```bash
-$ npm install
-```
-
-### Development
-
-```bash
-$ npm run dev
-```
-
-### Build
-
-```bash
-# For windows
-$ npm run build:win
-
-# For macOS
-$ npm run build:mac
-
-# For Linux
-$ npm run build:linux
-```
-
-## 最近功能更新
-
-### 交互优化 (2026-04-01)
-1. **选中样本交互改进**：
-   - 不再自动弹出操作栏，改为右键点击触发
-   - 右键点击样本时：选中该样本并显示操作栏
-   - 右键点击文件夹时：选中该文件夹内所有样本并显示操作栏
-
-2. **操作栏界面优化**：
-   - 移除重复的"关闭"按钮
-   - 将"清除选中"改为"返回"（功能不变：清除选中状态并隐藏操作栏）
-   - 将"删除选中"改为"移除采样"（功能不变：删除选中样本）
-
-### 功能增强
-1. **窗口透明度无极调节**：
-   - 透明度滑块现在支持连续平滑调节（`step="any"`）
-   - 显示精度提高到2位小数（`{opacity.toFixed(2)}`）
-   - 调节范围：0.2 - 1.0
-
-2. **波形显示质量提升**：
-   - 波形采样点从1200增加到2400个
-   - 波形显示更加细腻、精度更高
-
-### 相关文件修改
-- `src/store/sampleStore.ts`：添加`showSelectionBar`状态管理
-- `src/App.tsx`：修改SelectionBar显示条件
-- `src/components/SampleList/SampleItem.tsx`：右键菜单处理优化
-- `src/components/FolderItem.tsx`：添加文件夹右键支持
-- `src/components/SelectionBar.tsx`：界面文字优化
-- `src/components/TitleBar.tsx`：透明度调节优化
-- `src/hooks/useAudioEngine.ts`：增加波形采样点密度
-
-### 使用说明
-- **多选操作**：右键点击样本或文件夹触发选中操作栏
-- **透明度调节**：点击设置按钮(⚙) → 调整"窗口透明度"滑块
-- **清除选中**：点击操作栏中的"返回"按钮或按`Esc`键
+- 保留原有素材目录结构
+- 快速导入和批量管理采样
+- 统一试听与波形预览
+- 面向实际制作流程优化拖拽与复用体验
+- 尽量减少重复解码、重复 IO 和无意义缓存
 
 ---
 
-**详细更新记录请查看** [CHANGELOG.md](CHANGELOG.md)
+## 项目定位
+
+核心优先级是：
+
+1. **性能**：导入快、解码快、列表响应快
+2. **工作流**：方便试听、分组、拖拽、重复使用
+3. **界面**：保持简洁，轻量资源管理器
+
+
+---
+
+## 主要功能
+
+### 1. 目录树导入
+- 支持按目录导入音频素材
+- 保留根目录结构
+- 支持多个根目录叠加管理
+
+### 2. 音频预览与波形显示
+- 支持播放 / 暂停
+- 底部播放器显示进度
+- 支持拖动进度条 seek
+- 内置波形缓存用于快速预览
+
+### 3. 拖拽到调音软件
+- 支持拖入 Melodyne、FL Studio 等软件
+- 优化“试听 → 拖出”的连续操作体验
+
+### 4. 自动副本机制（主要特点）
+防止外部软件污染原素材：尤其是Melodyne对复用的素材会一起操作
+
+- 第一次拖出：使用原文件
+- 第二次开始：生成副本
+- 副本存储在 **应用安装位置/Copy**
+- 副本不在 UI 显示
+---
+
+## 技术栈
+
+- Electron
+- React
+- TypeScript
+- Zustand
+- Web Audio API
+- electron-store
+
+---
+
+## 安装与运行
+
+### 环境要求
+
+- Node.js 18+
+- npm
+
+### 安装依赖
+
+```bash
+npm install
+```
+
+### 开发模式
+
+```bash
+npm run dev
+```
+
+### 构建
+
+```bash
+npm run build
+```
+
+### 打包
+
+```bash
+npm run pack
+```
+
+---
+
+## 使用方法
+
+### 1. 导入素材
+导入你的音频目录（建议提前按项目/角色/音源整理好）
+
+### 2. 浏览
+按结构查看素材，支持批量选择
+
+### 3. 试听
+点击素材即可播放：
+
+- 播放 / 暂停
+- 查看进度
+- 拖动 seek
+
+### 4. 拖拽使用
+直接拖入 Melodyne / FL Studio 使用
+
+### 5. 重复使用保护
+多次拖出自动使用副本，避免污染原文件
+
+---
+
+## 当前重点方向
+
+### 1. 内存与缓存控制
+- 控制 AudioBuffer cache
+- 控制 waveform cache
+- 避免预解码过量
+
+### 2. 启动优化
+- 打开即用
+- 后台任务更温和
+
+### 3. 播放器优化
+- 降低无意义刷新
+- 保持流畅响应
+
+---
