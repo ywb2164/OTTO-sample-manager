@@ -104,110 +104,112 @@ export const GroupBar: React.FC = () => {
   }, [])
 
   return (
-    <div className="p-2 border-b border-border-primary flex items-center gap-2 overflow-x-auto">
-      <button
-        onClick={() => handleSelectGroup(null)}
-        className={`px-3 py-1 rounded text-sm whitespace-nowrap ${
-          activeGroupId === null
-            ? 'bg-bg-secondary text-text-primary'
-            : 'bg-bg-tertiary text-text-secondary hover:bg-bg-secondary'
-        }`}
-      >
-        全部
-      </button>
+    <div className="p-2 border-b border-border-primary overflow-x-auto overflow-y-hidden">
+      <div className="flex items-center gap-2 min-w-max whitespace-nowrap">
+        <button
+          onClick={() => handleSelectGroup(null)}
+          className={`shrink-0 px-3 py-1 rounded text-sm whitespace-nowrap ${
+            activeGroupId === null
+              ? 'bg-bg-secondary text-text-primary'
+              : 'bg-bg-tertiary text-text-secondary hover:bg-bg-secondary'
+          }`}
+        >
+          全部
+        </button>
 
-      {Array.from(groups.values()).map((group) => (
-        <div key={group.id} className="relative">
-          {editingGroupId === group.id ? (
-            <div className="flex items-center gap-1">
-              <input
-                type="text"
-                value={editingGroupName}
-                onChange={(e) => setEditingGroupName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSaveEdit()
-                  if (e.key === 'Escape') {
+        {Array.from(groups.values()).map((group) => (
+          <div key={group.id} className="relative shrink-0">
+            {editingGroupId === group.id ? (
+              <div className="flex items-center gap-1 shrink-0">
+                <input
+                  type="text"
+                  value={editingGroupName}
+                  onChange={(e) => setEditingGroupName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveEdit()
+                    if (e.key === 'Escape') {
+                      setEditingGroupId(null)
+                      setEditingGroupName('')
+                    }
+                  }}
+                  className="px-3 py-1 rounded text-sm bg-bg-tertiary text-text-primary border border-border focus:outline-none focus:border-accent-primary"
+                  autoFocus
+                />
+                <button
+                  onClick={handleSaveEdit}
+                  className="shrink-0 px-2 py-1 rounded text-sm bg-green-600 hover:bg-green-700 text-white whitespace-nowrap"
+                >
+                  保存
+                </button>
+                <button
+                  onClick={() => {
                     setEditingGroupId(null)
                     setEditingGroupName('')
-                  }
-                }}
-                className="px-3 py-1 rounded text-sm bg-bg-tertiary text-text-primary border border-border focus:outline-none focus:border-accent-primary"
-                autoFocus
-              />
+                  }}
+                  className="shrink-0 px-2 py-1 rounded text-sm bg-red-600 hover:bg-red-700 text-white whitespace-nowrap"
+                >
+                  取消
+                </button>
+              </div>
+            ) : (
               <button
-                onClick={handleSaveEdit}
-                className="px-2 py-1 rounded text-sm bg-green-600 hover:bg-green-700 text-white"
+                onClick={() => handleSelectGroup(group.id)}
+                onContextMenu={(e) => handleGroupContextMenu(e, group.id)}
+                className={`shrink-0 px-3 py-1 rounded text-sm whitespace-nowrap ${
+                  activeGroupId === group.id
+                    ? 'bg-bg-secondary text-text-primary'
+                    : 'bg-bg-tertiary text-text-secondary hover:bg-bg-secondary'
+                }`}
+                style={{ borderLeft: `4px solid ${group.color}` }}
               >
-                保存
+                {group.name} ({group.sampleIds.length})
               </button>
-              <button
-                onClick={() => {
-                  setEditingGroupId(null)
-                  setEditingGroupName('')
-                }}
-                className="px-2 py-1 rounded text-sm bg-red-600 hover:bg-red-700 text-white"
-              >
-                取消
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => handleSelectGroup(group.id)}
-              onContextMenu={(e) => handleGroupContextMenu(e, group.id)}
-              className={`px-3 py-1 rounded text-sm whitespace-nowrap ${
-                activeGroupId === group.id
-                  ? 'bg-bg-secondary text-text-primary'
-                  : 'bg-bg-tertiary text-text-secondary hover:bg-bg-secondary'
-              }`}
-              style={{ borderLeft: `4px solid ${group.color}` }}
-            >
-              {group.name} ({group.sampleIds.length})
-            </button>
-          )}
-        </div>
-      ))}
+            )}
+          </div>
+        ))}
 
-      {isCreatingGroup ? (
-        <div className="flex items-center gap-1">
-          <input
-            type="text"
-            value={newGroupName}
-            onChange={(e) => setNewGroupName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleCreateGroup()
-              if (e.key === 'Escape') {
+        {isCreatingGroup ? (
+          <div className="flex items-center gap-1 shrink-0">
+            <input
+              type="text"
+              value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleCreateGroup()
+                if (e.key === 'Escape') {
+                  setIsCreatingGroup(false)
+                  setNewGroupName('')
+                }
+              }}
+              placeholder="分组名称"
+              className="px-3 py-1 rounded text-sm bg-bg-tertiary text-text-primary border border-border focus:outline-none focus:border-accent-primary"
+              autoFocus
+            />
+            <button
+              onClick={handleCreateGroup}
+              className="shrink-0 px-2 py-1 rounded text-sm bg-accent-primary hover:bg-accent-light text-white whitespace-nowrap"
+            >
+              创建
+            </button>
+            <button
+              onClick={() => {
                 setIsCreatingGroup(false)
                 setNewGroupName('')
-              }
-            }}
-            placeholder="分组名称"
-            className="px-3 py-1 rounded text-sm bg-bg-tertiary text-text-primary border border-border focus:outline-none focus:border-accent-primary"
-            autoFocus
-          />
+              }}
+              className="shrink-0 px-2 py-1 rounded text-sm bg-red-600 hover:bg-red-700 text-white whitespace-nowrap"
+            >
+              取消
+            </button>
+          </div>
+        ) : (
           <button
-            onClick={handleCreateGroup}
-            className="px-2 py-1 rounded text-sm bg-accent-primary hover:bg-accent-light text-white"
+            onClick={() => setIsCreatingGroup(true)}
+            className="shrink-0 px-3 py-1 rounded text-sm bg-bg-tertiary text-text-secondary hover:bg-bg-secondary whitespace-nowrap"
           >
-            创建
+            + 新建分组
           </button>
-          <button
-            onClick={() => {
-              setIsCreatingGroup(false)
-              setNewGroupName('')
-            }}
-            className="px-2 py-1 rounded text-sm bg-red-600 hover:bg-red-700 text-white"
-          >
-            取消
-          </button>
-        </div>
-      ) : (
-        <button
-          onClick={() => setIsCreatingGroup(true)}
-          className="px-3 py-1 rounded text-sm bg-bg-tertiary text-text-secondary hover:bg-bg-secondary"
-        >
-          + 新建分组
-        </button>
-      )}
+        )}
+      </div>
 
       {/* 右键菜单 */}
       {contextMenu && (

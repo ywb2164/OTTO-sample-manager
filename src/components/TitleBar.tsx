@@ -74,6 +74,28 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onRem
     updateCopySettings({ keepCopies: value })
   }
 
+  const handleOpenLink = (url: string) => {
+    window.electronAPI.openExternalLink(url)
+  }
+
+  const BilibiliIcon = () => (
+    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M7.2 3.4a1 1 0 0 1 1.4 0l1.6 1.5h3.6l1.6-1.5a1 1 0 0 1 1.4 1.4l-.1.1h1.3A2.9 2.9 0 0 1 21 7.8v8.4a2.9 2.9 0 0 1-2.9 2.9H5.9A2.9 2.9 0 0 1 3 16.2V7.8a2.9 2.9 0 0 1 2.9-2.9h1.3l-.1-.1a1 1 0 0 1 0-1.4ZM5.9 6.9a.9.9 0 0 0-.9.9v8.4c0 .5.4.9.9.9h12.2c.5 0 .9-.4.9-.9V7.8a.9.9 0 0 0-.9-.9Zm2.6 2.4a1 1 0 0 1 1 1v3.4a1 1 0 1 1-2 0v-3.4a1 1 0 0 1 1-1Zm7 0a1 1 0 0 1 1 1v3.4a1 1 0 1 1-2 0v-3.4a1 1 0 0 1 1-1Z"
+      />
+    </svg>
+  )
+
+  const GithubIcon = () => (
+    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M12 .5A12 12 0 0 0 8.2 23.9c.6.1.8-.2.8-.6v-2.3c-3.3.7-4-1.4-4-1.4-.6-1.4-1.3-1.8-1.3-1.8-1.1-.8 0-.8 0-.8 1.2 0 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.6-1.3-5.6-6A4.7 4.7 0 0 1 5.2 8c-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.3 11.3 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.1a4.7 4.7 0 0 1 1.2 3.3c0 4.7-2.9 5.7-5.6 6 .4.3.8 1 .8 2.1v3.1c0 .4.2.7.8.6A12 12 0 0 0 12 .5Z"
+      />
+    </svg>
+  )
+
   return (
     // -webkit-app-region: drag 让这个区域可以拖动窗口
     <div
@@ -192,7 +214,40 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onRem
                 </span>
               </div>
               <div className="border-t border-border my-2"></div>
-              <div className="text-xs text-text-dim whitespace-nowrap text-center">关注杨薇柏_Official谢谢喵~</div>
+              <div className="space-y-1">
+                <div className="text-[11px] text-text-dim text-center">Authors</div>
+                <div className="flex items-center justify-center gap-2">
+                  <button
+                    className="inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded hover:bg-bg-hover text-text-primary text-xs"
+                    onClick={() => handleOpenLink('https://space.bilibili.com/1042301441')}
+                  >
+                    <span className="text-sky-400">
+                      <BilibiliIcon />
+                    </span>
+                    <span className="whitespace-nowrap">杨薇柏_Official</span>
+                  </button>
+                  <button
+                    className="inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded hover:bg-bg-hover text-text-primary text-xs"
+                    onClick={() => handleOpenLink('https://space.bilibili.com/364700163')}
+                  >
+                    <span className="text-sky-400">
+                      <BilibiliIcon />
+                    </span>
+                    <span className="whitespace-nowrap">_Candace_</span>
+                  </button>
+                </div>
+                <div className="flex justify-center">
+                  <button
+                    className="inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded hover:bg-bg-hover text-text-primary text-xs"
+                    onClick={() => handleOpenLink('https://github.com/ywb2164/OTTO-sample-manager')}
+                  >
+                    <span className="text-text-dim">
+                      <GithubIcon />
+                    </span>
+                    <span className="whitespace-nowrap">Github</span>
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>

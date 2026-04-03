@@ -66,7 +66,7 @@ export function useAudioEngine() {
   const animFrameRef = useRef<number>(0)
   const isPlayingRef = useRef<boolean>(false)
 
-  const { setCurrentTime, setIsPlaying, setDuration, setCurrentSampleId } = usePlayerStore()
+  const { setCurrentTime, setIsPlaying, setDuration, setCurrentSampleId, setCurrentFilePath } = usePlayerStore()
 
   // ------------------------------
   // 解码单个文件
@@ -188,6 +188,7 @@ export function useAudioEngine() {
 
     // 更新store状态
     setCurrentSampleId(sampleId)
+    setCurrentFilePath(filePath)
     setDuration(buffer.duration)
     setIsPlaying(true)
 

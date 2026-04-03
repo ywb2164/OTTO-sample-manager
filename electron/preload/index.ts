@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getFileInfo: (filePath: string) => ipcRenderer.invoke('get-file-info', filePath),
   validateFiles: (filePaths: string[]) => ipcRenderer.invoke('validate-files', filePaths),
   showInExplorer: (filePath: string) => ipcRenderer.send('show-in-explorer', filePath),
+  openExternalLink: (url: string) => ipcRenderer.send('open-external-link', url),
   
   // 拖拽
   dragOutFiles: (items: Array<{ id: string; filePath: string }>) => ipcRenderer.send('drag-out-files', items),
@@ -56,6 +57,7 @@ declare global {
       getFileInfo: (filePath: string) => Promise<{ exists: boolean; fileSize: number }>
       validateFiles: (filePaths: string[]) => Promise<{ path: string; valid: boolean }[]>
       showInExplorer: (filePath: string) => void
+      openExternalLink: (url: string) => void
       dragOutFiles: (items: Array<{ id: string; filePath: string }>) => void
       storeGet: (key: string) => Promise<unknown>
       storeSet: (key: string, value: unknown) => void

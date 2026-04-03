@@ -229,6 +229,10 @@ ipcMain.on('show-in-explorer', (_, filePath: string) => {
   shell.showItemInFolder(filePath)
 })
 
+ipcMain.on('open-external-link', (_, url: string) => {
+  shell.openExternal(url)
+})
+
 // ------------------------------
 // 原生文件拖拽（核心功能）
 // ------------------------------

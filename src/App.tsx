@@ -103,6 +103,14 @@ export default function App() {
   const selectedVisibleCount = orderedIds.filter(id => selectedIds.has(id)).length
   const isAllSelected = selectableCount > 0 && selectedVisibleCount === selectableCount
   const isPartiallySelected = selectedVisibleCount > 0 && selectedVisibleCount < selectableCount
+  const primarySelectedId = selectedIds.values().next().value as string | undefined
+  const primarySelectedSample = primarySelectedId ? samples.get(primarySelectedId) ?? null : null
+  const canControlPrimarySample = Boolean(primarySelectedSample && primarySelectedSample.isFileValid)
+  const isPrimarySamplePlaying = Boolean(
+    primarySelectedSample &&
+    currentSampleId === primarySelectedSample.id &&
+    isPlaying
+  )
 
   // 虚拟列表
   const flattenedItems = useSampleStore(state => {
@@ -490,12 +498,44 @@ export default function App() {
     }
   }, [play, getWaveform])
 
-  const handleTogglePause = useCallback(() => {
-    const { currentSampleId, currentFilePath } = usePlayerStore.getState()
-    if (currentSampleId && currentFilePath) {
-      togglePause(currentSampleId, currentFilePath)
+  const handlePrimaryPlaybackAction = useCallback(async () => {
+    const targetSample = (() => {
+      const { selectedIds, samples } = useSampleStore.getState()
+      const targetId = selectedIds.values().next().value as string | undefined
+      if (!targetId) return null
+      return samples.get(targetId) ?? null
+    })()
+
+    if (!targetSample || !targetSample.isFileValid) {
+      return
     }
-  }, [togglePause])
+
+    const playerState = usePlayerStore.getState()
+    if (playerState.currentSampleId === targetSample.id && playerState.currentFilePath) {
+      await togglePause(targetSample.id, playerState.currentFilePath)
+
+      if (playerState.isPlaying) {
+        return
+      }
+
+      const cachedWaveform = getWaveform(targetSample.id)
+      if (cachedWaveform) {
+        setCurrentWaveform(cachedWaveform)
+      }
+      return
+    }
+
+    const waveform = await play(targetSample.id, targetSample.filePath, 0)
+    if (waveform) {
+      setCurrentWaveform(waveform)
+      return
+    }
+
+    const cachedWaveform = getWaveform(targetSample.id)
+    if (cachedWaveform) {
+      setCurrentWaveform(cachedWaveform)
+    }
+  }, [getWaveform, play, togglePause])
 
   const handleSeek = useCallback((time: number) => {
     const { currentSampleId, currentFilePath } = usePlayerStore.getState()
@@ -636,7 +676,9 @@ export default function App() {
       <StatusBar
         waveformData={currentWaveform}
         onSeek={handleSeek}
-        onTogglePause={handleTogglePause}
+        onPrimaryAction={handlePrimaryPlaybackAction}
+        canControl={canControlPrimarySample}
+        isPrimaryPlaying={isPrimarySamplePlaying}
       />
     </div>
   )
