@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 文件操作
   openFileDialog: () => ipcRenderer.invoke('dialog-open-files'),
   openFolderDialog: () => ipcRenderer.invoke('dialog-open-folder'),
+  openLyricsFileDialog: () => ipcRenderer.invoke('dialog-open-lyrics-file'),
   scanFolder: (folderPath: string) => ipcRenderer.invoke('scan-folder', folderPath),
   getFileInfo: (filePath: string) => ipcRenderer.invoke('get-file-info', filePath),
   validateFiles: (filePaths: string[]) => ipcRenderer.invoke('validate-files', filePaths),
@@ -31,7 +32,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 读取文件为ArrayBuffer（用于音频解码）
   readFileAsBuffer: (filePath: string): Promise<ArrayBuffer> => {
     return ipcRenderer.invoke('read-file-buffer', filePath)
-  }
+  },
+  createLyricsFiles: (payload: {
+    targetGroupName: string
+    items: Array<{ id: string; sourcePath: string; fileName: string }>
+  }) => ipcRenderer.invoke('lyrics-create-files', payload)
 })
 
 // TypeScript类型声明
@@ -53,6 +58,7 @@ declare global {
       setOpacity: (value: number) => void
       openFileDialog: () => Promise<string[]>
       openFolderDialog: () => Promise<string | null>
+      openLyricsFileDialog: () => Promise<string | null>
       scanFolder: (folderPath: string) => Promise<ScannedFolderNode | null>
       getFileInfo: (filePath: string) => Promise<{ exists: boolean; fileSize: number }>
       validateFiles: (filePaths: string[]) => Promise<{ path: string; valid: boolean }[]>
@@ -63,6 +69,14 @@ declare global {
       storeSet: (key: string, value: unknown) => void
       storeDelete: (key: string) => void
       readFileAsBuffer: (filePath: string) => Promise<ArrayBuffer>
+      createLyricsFiles: (payload: {
+        targetGroupName: string
+        items: Array<{ id: string; sourcePath: string; fileName: string }>
+      }) => Promise<{
+        success: Array<{ id: string; sourcePath: string; targetPath: string; fileSize: number }>
+        failed: Array<{ id: string; sourcePath: string; reason: string }>
+        targetDir: string
+      }>
     }
   }
 }

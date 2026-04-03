@@ -1,53 +1,132 @@
 import { useRef, useCallback } from 'react'
 import { usePlayerStore } from '@/store/playerStore'
 
-// LRU缓存，限制内存中的AudioBuffer数量
-class LRUCache<K, V> {
-  private cache = new Map<K, V>()
-  private maxSize: number
+const AUDIO_BUFFER_CACHE_LIMIT_BYTES = 200 * 1024 * 1024
+const WAVEFORM_CACHE_LIMIT_BYTES = 50 * 1024 * 1024
+const isDev = import.meta.env.DEV
 
-  constructor(maxSize: number) {
-    this.maxSize = maxSize
-  }
+type CacheEntry<V> = {
+  value: V
+  estimatedBytes: number
+  lastAccessAt: number
+}
+
+class ByteLimitedLRUCache<K, V> {
+  private cache = new Map<K, CacheEntry<V>>()
+  private totalBytes = 0
+
+  constructor(
+    private readonly name: string,
+    private readonly maxBytes: number,
+    private readonly isProtectedKey?: (key: K) => boolean,
+  ) {}
 
   get(key: K): V | undefined {
-    if (!this.cache.has(key)) return undefined
-    // 移到末尾（最近使用）
-    const value = this.cache.get(key)!
+    const entry = this.cache.get(key)
+    if (!entry) return undefined
+    entry.lastAccessAt = Date.now()
     this.cache.delete(key)
-    this.cache.set(key, value)
-    return value
-  }
-
-  set(key: K, value: V): void {
-    if (this.cache.has(key)) {
-      this.cache.delete(key)
-    } else if (this.cache.size >= this.maxSize) {
-      // 淘汰最久未用（第一个）
-      const firstKey = this.cache.keys().next().value
-      this.cache.delete(firstKey)
-    }
-    this.cache.set(key, value)
+    this.cache.set(key, entry)
+    return entry.value
   }
 
   has(key: K): boolean {
     return this.cache.has(key)
   }
 
-  delete(key: K): void {
-    this.cache.delete(key)
+  set(key: K, value: V, estimatedBytes: number): void {
+    const now = Date.now()
+    const existing = this.cache.get(key)
+    if (existing) {
+      this.totalBytes -= existing.estimatedBytes
+      this.cache.delete(key)
+    }
+
+    this.cache.set(key, {
+      value,
+      estimatedBytes,
+      lastAccessAt: now,
+    })
+    this.totalBytes += estimatedBytes
+
+    if (isDev) {
+      console.debug(`[cache:${this.name}] set`, {
+        key,
+        estimatedBytes,
+        totalBytes: this.totalBytes,
+        count: this.cache.size,
+      })
+    }
+
+    this.evictIfNeeded()
   }
 
-  get size(): number {
-    return this.cache.size
+  delete(key: K): boolean {
+    const entry = this.cache.get(key)
+    if (!entry) return false
+
+    this.totalBytes -= entry.estimatedBytes
+    this.cache.delete(key)
+    return true
+  }
+
+  clear(): void {
+    this.cache.clear()
+    this.totalBytes = 0
+  }
+
+  getStats() {
+    return {
+      count: this.cache.size,
+      bytes: this.totalBytes,
+      maxBytes: this.maxBytes,
+    }
+  }
+
+  private evictIfNeeded(): void {
+    if (this.totalBytes <= this.maxBytes) return
+
+    const candidates = [...this.cache.entries()]
+      .filter(([key]) => !this.isProtectedKey?.(key))
+      .sort((a, b) => a[1].lastAccessAt - b[1].lastAccessAt)
+
+    for (const [key, entry] of candidates) {
+      if (this.totalBytes <= this.maxBytes) break
+
+      this.cache.delete(key)
+      this.totalBytes -= entry.estimatedBytes
+
+      if (isDev) {
+        console.debug(`[cache:${this.name}] evict`, {
+          key,
+          freedBytes: entry.estimatedBytes,
+          totalBytes: this.totalBytes,
+          count: this.cache.size,
+        })
+      }
+    }
   }
 }
 
-// 波形数据缓存（比AudioBuffer轻很多，可以全量缓存）
-const waveformCache = new Map<string, Float32Array>()
+const pinnedSampleIds = new Set<string>()
 
-// AudioBuffer LRU缓存（最多保留150个已解码的buffer）
-const audioBufferCache = new LRUCache<string, AudioBuffer>(150)
+function isPinnedSample(sampleId: string): boolean {
+  return pinnedSampleIds.has(sampleId)
+}
+
+// 波形数据缓存
+const waveformCache = new ByteLimitedLRUCache<string, Float32Array>(
+  'waveform',
+  WAVEFORM_CACHE_LIMIT_BYTES,
+  isPinnedSample,
+)
+
+// AudioBuffer LRU缓存
+const audioBufferCache = new ByteLimitedLRUCache<string, AudioBuffer>(
+  'audio-buffer',
+  AUDIO_BUFFER_CACHE_LIMIT_BYTES,
+  isPinnedSample,
+)
 
 // 全局AudioContext（单例）
 let audioContextInstance: AudioContext | null = null
@@ -59,30 +138,31 @@ function getAudioContext(): AudioContext {
   return audioContextInstance
 }
 
+function estimateAudioBufferBytes(audioBuffer: AudioBuffer): number {
+  return audioBuffer.length * audioBuffer.numberOfChannels * 4
+}
+
 function cacheAudioBuffer(sampleId: string, audioBuffer: AudioBuffer): void {
-  audioBufferCache.set(sampleId, audioBuffer)
+  audioBufferCache.set(sampleId, audioBuffer, estimateAudioBufferBytes(audioBuffer))
 }
 
 function cacheWaveform(sampleId: string, waveform: Float32Array): void {
-  waveformCache.set(sampleId, waveform)
+  waveformCache.set(sampleId, waveform, waveform.byteLength)
 }
 
 export function useAudioEngine() {
   const currentSourceRef = useRef<AudioBufferSourceNode | null>(null)
-  const startTimeRef = useRef<number>(0)       // AudioContext时间戳，播放开始时记录
-  const startOffsetRef = useRef<number>(0)     // 从哪个位置开始播放
+  const startTimeRef = useRef<number>(0)
+  const startOffsetRef = useRef<number>(0)
   const animFrameRef = useRef<number>(0)
   const isPlayingRef = useRef<boolean>(false)
 
   const { setCurrentTime, setIsPlaying, setDuration, setCurrentSampleId, setCurrentFilePath } = usePlayerStore()
 
-  // ------------------------------
-  // 解码单个文件
-  // ------------------------------
   const decodeFile = useCallback(async (sampleId: string, filePath: string): Promise<AudioBuffer | null> => {
-    // 已有缓存直接返回
-    if (audioBufferCache.has(sampleId)) {
-      return audioBufferCache.get(sampleId)!
+    const cached = audioBufferCache.get(sampleId)
+    if (cached) {
+      return cached
     }
 
     try {
@@ -97,12 +177,10 @@ export function useAudioEngine() {
     }
   }, [])
 
-  // ------------------------------
-  // 提取波形数据（降采样）
-  // ------------------------------
   const extractWaveform = useCallback((sampleId: string, audioBuffer: AudioBuffer): Float32Array => {
-    if (waveformCache.has(sampleId)) {
-      return waveformCache.get(sampleId)!
+    const cached = waveformCache.get(sampleId)
+    if (cached) {
+      return cached
     }
 
     const targetPoints = 2400
@@ -130,14 +208,10 @@ export function useAudioEngine() {
     return extractWaveform(sampleId, audioBuffer)
   }, [extractWaveform])
 
-  // ------------------------------
-  // 批量预解码（后台进行）
-  // ------------------------------
   const preDecodeAll = useCallback(async (
     samples: Array<{ id: string; filePath: string }>,
     onProgress?: (decoded: number, total: number) => void
   ) => {
-    // 并发数限制为3，避免内存峰值
     const concurrency = 3
     let decoded = 0
 
@@ -145,12 +219,15 @@ export function useAudioEngine() {
       const batch = samples.slice(i, i + concurrency)
       await Promise.all(
         batch.map(async ({ id, filePath }) => {
-          if (!audioBufferCache.has(id)) {
-            const buffer = await decodeFile(id, filePath)
-            if (buffer) {
-              extractWaveform(id, buffer)
-            }
+          let buffer = audioBufferCache.get(id)
+          if (!buffer) {
+            buffer = await decodeFile(id, filePath)
           }
+
+          if (buffer && !waveformCache.has(id)) {
+            extractWaveform(id, buffer)
+          }
+
           decoded++
           onProgress?.(decoded, samples.length)
         })
@@ -158,35 +235,25 @@ export function useAudioEngine() {
     }
   }, [decodeFile, extractWaveform])
 
-  // ------------------------------
-  // 播放
-  // ------------------------------
   const play = useCallback(async (
     sampleId: string,
     filePath: string,
     offset: number = 0
   ) => {
-    // 停止当前播放
     stopPlayback()
 
     const ctx = getAudioContext()
-
-    // 恢复可能被暂停的AudioContext（浏览器自动策略）
     if (ctx.state === 'suspended') {
       await ctx.resume()
     }
 
-    // 获取AudioBuffer（可能需要实时解码）
     let buffer = audioBufferCache.get(sampleId) || null
     if (!buffer) {
       buffer = await decodeFile(sampleId, filePath)
       if (!buffer) return
     }
 
-    // 提取波形（如果还没有）
     const waveform = extractWaveform(sampleId, buffer)
-
-    // 创建播放节点
     const source = ctx.createBufferSource()
     source.buffer = buffer
     source.connect(ctx.destination)
@@ -198,32 +265,28 @@ export function useAudioEngine() {
     startTimeRef.current = ctx.currentTime
     startOffsetRef.current = safeOffset
     isPlayingRef.current = true
+    pinnedSampleIds.add(sampleId)
 
-    // 更新store状态
     setCurrentSampleId(sampleId)
     setCurrentFilePath(filePath)
     setDuration(buffer.duration)
     setIsPlaying(true)
 
-    // 播放结束回调
     source.onended = () => {
       if (isPlayingRef.current) {
         isPlayingRef.current = false
+        pinnedSampleIds.delete(sampleId)
         setIsPlaying(false)
         setCurrentTime(0)
         cancelAnimationFrame(animFrameRef.current)
       }
     }
 
-    // 启动播放位置追踪
     trackPlayhead()
 
     return waveform
   }, [decodeFile, extractWaveform])
 
-  // ------------------------------
-  // 追踪播放进度（requestAnimationFrame）
-  // ------------------------------
   const trackPlayhead = useCallback(() => {
     const ctx = getAudioContext()
 
@@ -238,34 +301,32 @@ export function useAudioEngine() {
     animFrameRef.current = requestAnimationFrame(tick)
   }, [setCurrentTime])
 
-  // ------------------------------
-  // 停止
-  // ------------------------------
   const stopPlayback = useCallback(() => {
     cancelAnimationFrame(animFrameRef.current)
     isPlayingRef.current = false
+
+    const currentSampleId = usePlayerStore.getState().currentSampleId
+    if (currentSampleId) {
+      pinnedSampleIds.delete(currentSampleId)
+    }
 
     if (currentSourceRef.current) {
       try {
         currentSourceRef.current.stop()
         currentSourceRef.current.disconnect()
-      } catch (e) {
-        // 忽略已经停止的source抛出的错误
+      } catch {
+        // ignore
       }
       currentSourceRef.current = null
     }
     setIsPlaying(false)
   }, [setIsPlaying])
 
-  // ------------------------------
-  // 跳转到指定位置
-  // ------------------------------
   const seekTo = useCallback((
     sampleId: string,
     filePath: string,
     time: number
   ) => {
-    // seek本质是停止当前播放，从新位置重新开始
     const wasPlaying = isPlayingRef.current
     stopPlayback()
     setCurrentTime(time)
@@ -273,35 +334,35 @@ export function useAudioEngine() {
     if (wasPlaying) {
       play(sampleId, filePath, time)
     } else {
-      // 不播放，只更新位置（用于拖动进度条时预览位置）
       startOffsetRef.current = time
     }
   }, [play, stopPlayback, setCurrentTime])
 
-  // ------------------------------
-  // 暂停/恢复
-  // ------------------------------
   const togglePause = useCallback(async (
     sampleId: string,
     filePath: string
   ) => {
     if (isPlayingRef.current) {
-      // 记录当前时间后停止
       const ctx = getAudioContext()
       const currentTime = startOffsetRef.current + (ctx.currentTime - startTimeRef.current)
       stopPlayback()
       setCurrentTime(currentTime)
       startOffsetRef.current = currentTime
     } else {
-      // 从上次停止的位置恢复
       await play(sampleId, filePath, startOffsetRef.current)
     }
   }, [play, stopPlayback, setCurrentTime])
 
-  // 获取缓存的波形数据
   const getWaveform = useCallback((sampleId: string): Float32Array | null => {
     return waveformCache.get(sampleId) ?? null
   }, [])
+
+  const getCacheStats = useCallback(() => ({
+    audioBufferCacheCount: audioBufferCache.getStats().count,
+    audioBufferCacheBytes: audioBufferCache.getStats().bytes,
+    waveformCacheCount: waveformCache.getStats().count,
+    waveformCacheBytes: waveformCache.getStats().bytes,
+  }), [])
 
   return {
     play,
@@ -310,5 +371,6 @@ export function useAudioEngine() {
     preDecodeAll,
     getWaveform,
     primeDecodedSample,
+    getCacheStats,
   }
 }

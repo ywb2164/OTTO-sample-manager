@@ -1,8 +1,8 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import { join } from 'path'
-import { existsSync, readdirSync, statSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'fs'
 import Store from 'electron-store'
-import { cleanupManagedCopies, createManagedCopy } from './copyManager'
+import { cleanupManagedCopies, createManagedCopy, getLyricsAssembliesDir } from './copyManager'
 
 interface ScannedFolderNode {
   name: string
@@ -169,6 +169,18 @@ ipcMain.handle('dialog-open-folder', async () => {
   return result.canceled ? null : result.filePaths[0]
 })
 
+ipcMain.handle('dialog-open-lyrics-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    title: '选择活字印刷文本 txt',
+    properties: ['openFile'],
+    filters: [
+      { name: '文本文件', extensions: ['txt'] },
+      { name: '全部文件', extensions: ['*'] },
+    ],
+  })
+  return result.canceled ? null : result.filePaths[0]
+})
+
 // 扫描文件夹结构，保留根目录与层级
 ipcMain.handle('scan-folder', async (_, folderPath: string) => {
   const audioExts = ['.wav', '.mp3', '.ogg', '.flac', '.aiff', '.aif', '.m4a']
@@ -312,4 +324,47 @@ ipcMain.handle('read-file-buffer', async (_, filePath: string) => {
   } catch (e) {
     throw new Error(`Failed to read file: ${filePath}`)
   }
+})
+
+function sanitizePathSegment(value: string): string {
+  return value.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'lyrics_group'
+}
+
+ipcMain.handle('lyrics-create-files', async (_, payload: {
+  targetGroupName: string
+  items: Array<{ id: string; sourcePath: string; fileName: string }>
+}) => {
+  const lyricsAssembliesRoot = await getLyricsAssembliesDir()
+  const baseDir = join(
+    lyricsAssembliesRoot,
+    `${sanitizePathSegment(payload.targetGroupName)}_${Date.now()}`
+  )
+
+  mkdirSync(baseDir, { recursive: true })
+
+  const success: Array<{ id: string; sourcePath: string; targetPath: string; fileSize: number }> = []
+  const failed: Array<{ id: string; sourcePath: string; reason: string }> = []
+
+  for (const item of payload.items) {
+    try {
+      if (!existsSync(item.sourcePath)) {
+        failed.push({ id: item.id, sourcePath: item.sourcePath, reason: 'source-missing' })
+        continue
+      }
+
+      const targetPath = join(baseDir, sanitizePathSegment(item.fileName))
+      copyFileSync(item.sourcePath, targetPath)
+      const fileStat = statSync(targetPath)
+      success.push({
+        id: item.id,
+        sourcePath: item.sourcePath,
+        targetPath,
+        fileSize: fileStat.size,
+      })
+    } catch {
+      failed.push({ id: item.id, sourcePath: item.sourcePath, reason: 'copy-failed' })
+    }
+  }
+
+  return { success, failed, targetDir: baseDir }
 })

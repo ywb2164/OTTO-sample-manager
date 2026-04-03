@@ -4,18 +4,19 @@ import { useSampleStore } from '@/store/sampleStore'
 interface Props {
   onImportFiles: () => void
   onImportFolder: () => void
+  onAssembleLyrics: () => void
   onRemoveAllImported: () => void
   isImporting: boolean
 }
 
-export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onRemoveAllImported, isImporting }) => {
+export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onAssembleLyrics, onRemoveAllImported, isImporting }) => {
   const [alwaysOnTop, setAlwaysOnTop] = useState(true)
   const [opacity, setOpacity] = useState(1.0)
   const [enableAutoCopy, setEnableAutoCopy] = useState(true)
   const [keepCopies, setKeepCopies] = useState(false)
   const [showImportMenu, setShowImportMenu] = useState(false)
   const [showSettingsMenu, setShowSettingsMenu] = useState(false)
-  const { folderSettings, setExpandOnSearch, setFolderClassificationEnabled } = useSampleStore()
+  const { folderSettings, setExpandOnSearch, setFolderClassificationEnabled, setMemoryOptimizationMode } = useSampleStore()
 
   useEffect(() => {
     window.electronAPI.getAlwaysOnTop().then(setAlwaysOnTop)
@@ -79,6 +80,15 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onRem
     window.electronAPI.openExternalLink(url)
   }
 
+  const actionButtonClassName =
+    'inline-flex h-8 items-center justify-center rounded px-3 text-xs leading-none text-white transition-colors whitespace-nowrap'
+
+  const primaryActionButtonClassName = `${actionButtonClassName} ${
+    isImporting
+      ? 'bg-accent-primary/60 cursor-not-allowed'
+      : 'bg-accent-primary/85 hover:bg-accent-primary'
+  }`
+
   const BilibiliIcon = () => (
     <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true">
       <path
@@ -113,21 +123,30 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onRem
         className="flex items-center gap-1"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
+        <button
+          className={primaryActionButtonClassName}
+          onClick={onAssembleLyrics}
+          disabled={isImporting}
+        >
+          活字印刷生成
+        </button>
+
         {/* 导入菜单 */}
         <div className="relative">
           <button
-            className={`text-xs px-2 py-1 rounded text-white transition-colors ${
-              isImporting
-                ? 'bg-accent-primary/60 cursor-not-allowed'
-                : 'bg-accent-primary hover:bg-accent-light'
-            }`}
+            className={primaryActionButtonClassName}
             onClick={() => {
               if (isImporting) return
               setShowImportMenu(!showImportMenu)
             }}
             disabled={isImporting}
           >
-            {isImporting ? '导入中...' : '导入 ▾'}
+            <span>{isImporting ? '导入中...' : '导入'}</span>
+            {!isImporting && (
+              <span className="ml-1 inline-flex items-center text-[10px] leading-none">
+                ▾
+              </span>
+            )}
           </button>
           {showImportMenu && !isImporting && (
             <div className="absolute top-full right-0 mt-1 bg-bg-tertiary border border-border rounded shadow-lg z-50 min-w-32">
@@ -205,6 +224,18 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onRem
               </label>
               <div className="text-[11px] text-text-dim mt-1 leading-4">
                 关闭时默认清理拖拽生成的外部编辑副本
+              </div>
+              <div className="border-t border-border my-2"></div>
+              <label className="flex items-center gap-2 text-xs text-text-primary cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={folderSettings.memoryOptimizationMode}
+                  onChange={(e) => setMemoryOptimizationMode(e.target.checked)}
+                />
+                <span>内存优化模式</span>
+              </label>
+              <div className="text-[11px] text-text-dim mt-1 leading-4">
+                如怕爆内存可用，加载当前分组、“全部”的可见1-10（并非前10个）
               </div>
               <div className="border-t border-border my-2"></div>
               <div className="flex justify-between items-center text-xs text-text-primary w-full gap-2">

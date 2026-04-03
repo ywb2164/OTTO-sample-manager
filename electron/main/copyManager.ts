@@ -19,6 +19,8 @@ export interface CopyRecord {
 
 const copyRecords = new Map<string, CopyRecord>()
 let resolvedCopiesRoot: string | null = null
+const TRANSIENT_COPIES_DIR_NAME = 'drag-copies'
+const LYRICS_ASSEMBLIES_DIR_NAME = 'lyrics-assemblies'
 
 function getPreferredCopiesRoot(): string {
   if (app.isPackaged) {
@@ -50,6 +52,24 @@ async function resolveCopiesRoot(): Promise<string> {
   }
 
   throw new Error('Unable to resolve a writable copy directory')
+}
+
+export async function getCopiesRoot(): Promise<string> {
+  return resolveCopiesRoot()
+}
+
+export async function getManagedCopiesDir(): Promise<string> {
+  const root = await resolveCopiesRoot()
+  const dir = join(root, TRANSIENT_COPIES_DIR_NAME)
+  await mkdir(dir, { recursive: true })
+  return dir
+}
+
+export async function getLyricsAssembliesDir(): Promise<string> {
+  const root = await resolveCopiesRoot()
+  const dir = join(root, LYRICS_ASSEMBLIES_DIR_NAME)
+  await mkdir(dir, { recursive: true })
+  return dir
 }
 
 function sanitizeBaseName(sourcePath: string): string {
@@ -109,7 +129,7 @@ export async function createManagedCopy(item: CopySourceItem): Promise<CopyRecor
     throw new Error(`Source file does not exist: ${item.filePath}`)
   }
 
-  const copiesRoot = await resolveCopiesRoot()
+  const copiesRoot = await getManagedCopiesDir()
 
   const copyIndex = await getNextCopyIndex(copiesRoot, item.filePath, item.id)
   const targetPath = join(copiesRoot, buildCopyFileName(item.filePath, item.id, copyIndex))
@@ -135,6 +155,5 @@ export function getManagedCopyRecords(): CopyRecord[] {
 
 export async function cleanupManagedCopies(): Promise<void> {
   copyRecords.clear()
-  await rm(await resolveCopiesRoot(), { recursive: true, force: true })
-  resolvedCopiesRoot = null
+  await rm(await getManagedCopiesDir(), { recursive: true, force: true })
 }

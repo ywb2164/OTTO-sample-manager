@@ -90,6 +90,7 @@ interface SampleStore {
   folderSettings: {
     expandOnSearch: boolean
     folderClassificationEnabled: boolean
+    memoryOptimizationMode: boolean
   }
   hiddenSampleIds: Set<string>
   hiddenFolderIds: Set<string>
@@ -136,6 +137,7 @@ interface SampleStore {
   moveFolder: (fromIndex: number, toIndex: number) => void
   setExpandOnSearch: (value: boolean) => void
   setFolderClassificationEnabled: (value: boolean) => void
+  setMemoryOptimizationMode: (value: boolean) => void
 
   toggleSampleHidden: (sampleId: string) => void
   toggleFolderHidden: (folderId: string) => void
@@ -168,6 +170,7 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
   folderSettings: {
     expandOnSearch: true,
     folderClassificationEnabled: true,
+    memoryOptimizationMode: false,
   },
   hiddenSampleIds: new Set(),
   hiddenFolderIds: new Set(),
@@ -546,6 +549,10 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
 
   setFolderClassificationEnabled: (value) => set((state) => ({
     folderSettings: { ...state.folderSettings, folderClassificationEnabled: value },
+  })),
+
+  setMemoryOptimizationMode: (value) => set((state) => ({
+    folderSettings: { ...state.folderSettings, memoryOptimizationMode: value },
   })),
 
   toggleSampleHidden: (sampleId) => set((state) => {
