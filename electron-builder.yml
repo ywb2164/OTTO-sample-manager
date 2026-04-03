@@ -1,19 +1,49 @@
 appId: com.electron.app
-productName: sample-manager
+productName: 采样管理器
+copyright: Copyright © 2024
 directories:
   buildResources: build
+  output: ../sample-manager-release
+asar: true
 files:
+  - out/**/*
+  - package.json
   - '!**/.vscode/*'
+  - '!**/.idea/*'
+  - '!**/.git/*'
+  - '!**/.claude/*'
   - '!src/*'
+  - '!build/*'
+  - '!resources/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!vite.config.{js,ts,mjs,cjs}'
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
-  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!{.env,.env.*,.npmrc,package-lock.json,pnpm-lock.yaml,yarn.lock}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
-asarUnpack:
-  - resources/**
+  - '!**/*.{map,md,markdown,mkdown}'
+  - '!**/*.{d.ts,d.cts,d.mts,test-d.ts}'
+  - '!**/{test,tests,__tests__,spec,specs,example,examples,demo,demos,docs,doc,benchmark,benchmarks}/**'
+  - '!**/node_modules/**/{test,tests,__tests__,spec,specs,example,examples,demo,demos,docs,doc,benchmark,benchmarks}/**'
+  - '!**/node_modules/**/.github/**'
+  - '!**/node_modules/**/src/**'
+  - '!**/node_modules/**/.runkit_example.js'
+  - '!**/node_modules/**/dist-src/**'
+extraResources:
+  - from: resources/drag-icon.png
+    to: resources/drag-icon.png
 win:
   executableName: sample-manager
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
 nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}

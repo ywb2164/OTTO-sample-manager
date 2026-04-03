@@ -16,12 +16,9 @@
     "zustand": "^4.4.7"
   },
   "devDependencies": {
-    "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/tsconfig": "^2.0.0",
-    "@electron-toolkit/utils": "^3.0.0",
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",
-    "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.17",
     "electron": "28.2.0",
@@ -31,47 +28,5 @@
     "tailwindcss": "^3.4.1",
     "typescript": "^5.3.3",
     "vite": "^5.0.12"
-  },
-  "build": {
-    "appId": "com.yourname.samplemanager",
-    "productName": "采样管理器",
-    "copyright": "Copyright © 2024",
-    "directories": {
-      "output": "../sample-manager-release"
-    },
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "resources/icon.ico"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "采样管理器"
-    },
-    "files": [
-      "out/**/*",
-      "resources/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "resources",
-        "to": "resources"
-      }
-    ]
   }
 }

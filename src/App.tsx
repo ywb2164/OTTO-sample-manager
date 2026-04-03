@@ -1,6 +1,6 @@
 import React, { useEffect, useCallback, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { v4 as uuidv4 } from 'uuid'  // npm install uuid @types/uuid
+import { v4 as uuidv4 } from 'uuid'
 
 import { TitleBar } from '@/components/TitleBar'
 import { SearchBar } from '@/components/SearchBar'

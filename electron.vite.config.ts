@@ -6,6 +6,7 @@ export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
     build: {
+      sourcemap: false,
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'electron/main/index.ts')
@@ -16,6 +17,7 @@ export default defineConfig({
   preload: {
     plugins: [externalizeDepsPlugin()],
     build: {
+      sourcemap: false,
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'electron/preload/index.ts')
@@ -32,6 +34,7 @@ export default defineConfig({
     },
     plugins: [react()],
     build: {
+      sourcemap: false,
       rollupOptions: {
         input: resolve(__dirname, 'index.html')
       }
