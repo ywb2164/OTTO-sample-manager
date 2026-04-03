@@ -36,7 +36,29 @@ export default defineConfig({
     build: {
       sourcemap: false,
       rollupOptions: {
-        input: resolve(__dirname, 'index.html')
+        input: resolve(__dirname, 'index.html'),
+        output: {
+          manualChunks(id) {
+            const normalizedId = id.replace(/\\/g, '/')
+
+            if (normalizedId.includes('/node_modules/')) {
+              if (
+                normalizedId.includes('/react/') ||
+                normalizedId.includes('/react-dom/') ||
+                normalizedId.includes('/scheduler/')
+              ) {
+                return 'react-vendor'
+              }
+
+              if (normalizedId.includes('/@tanstack/react-virtual/')) {
+                return 'virtual-list'
+              }
+
+              return 'renderer-vendor'
+            }
+
+          }
+        }
       }
     }
   }

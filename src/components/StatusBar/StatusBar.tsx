@@ -1,5 +1,4 @@
-import React from 'react'
-import { WaveformDisplay } from './WaveformDisplay'
+import React, { Suspense } from 'react'
 import { usePlayerStore } from '@/store/playerStore'
 import { useSampleStore } from '@/store/sampleStore'
 
@@ -8,6 +7,16 @@ interface Props {
   onSeek: (time: number) => void
   onTogglePause: () => void
 }
+
+const WaveformDisplay = React.lazy(() =>
+  import('./WaveformDisplay').then((module) => ({ default: module.WaveformDisplay }))
+)
+
+const WaveformPlaceholder: React.FC = () => (
+  <div className="w-full h-full bg-gray-800 flex items-center justify-center text-xs text-gray-400">
+    无波形数据
+  </div>
+)
 
 export const StatusBar: React.FC<Props> = ({ waveformData, onSeek, onTogglePause }) => {
   const { currentSampleId, isPlaying, currentTime, duration } = usePlayerStore()
@@ -47,11 +56,17 @@ export const StatusBar: React.FC<Props> = ({ waveformData, onSeek, onTogglePause
 
       {/* 波形区域 */}
       <div className="h-20 relative">
-        <WaveformDisplay
-          waveformData={waveformData}
-          duration={duration}
-          onSeek={onSeek}
-        />
+        {waveformData && waveformData.length > 0 ? (
+          <Suspense fallback={<WaveformPlaceholder />}>
+            <WaveformDisplay
+              waveformData={waveformData}
+              duration={duration}
+              onSeek={onSeek}
+            />
+          </Suspense>
+        ) : (
+          <WaveformPlaceholder />
+        )}
       </div>
 
       {/* 播放控制栏 */}

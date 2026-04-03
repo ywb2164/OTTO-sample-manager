@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useState } from 'react'
+import React, { Suspense, useEffect, useCallback, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -7,14 +7,16 @@ import { SearchBar } from '@/components/SearchBar'
 import { GroupBar } from '@/components/GroupBar'
 import { SampleItem } from '@/components/SampleList/SampleItem'
 import { FolderItem } from '@/components/FolderItem'
-import { SelectionBar } from '@/components/SelectionBar'
 import { StatusBar } from '@/components/StatusBar/StatusBar'
-import { ContextMenu } from '@/components/ContextMenu'
 
 import { useSampleStore } from '@/store/sampleStore'
 import { usePlayerStore } from '@/store/playerStore'
 import { useAudioEngine } from '@/hooks/useAudioEngine'
 import { Sample } from '@/types'
+
+const SelectionBar = React.lazy(() =>
+  import('@/components/SelectionBar').then((module) => ({ default: module.SelectionBar }))
+)
 
 export default function App() {
   const listRef = React.useRef<HTMLDivElement>(null)
@@ -25,7 +27,7 @@ export default function App() {
     toggleSelected, clearSelection, selectAll,
     setAnchorId, setSelected,
     toggleFolderExpanded, renameFolder, removeFolder, moveFolder,
-    folders, expandedFolderIds, getFolderByPath
+    folders, expandedFolderIds
   } = useSampleStore()
 
   const { currentSampleId, isPlaying } = usePlayerStore()
@@ -122,15 +124,12 @@ export default function App() {
       // 清空现有分组（如果有的话）
       const { groups } = useSampleStore.getState()
       if (groups.size > 0) {
-        // 通常启动时groups为空，但以防万一
-        console.log('跳过恢复分组，因为已有分组存在')
         return
       }
       // 添加所有分组
       Object.values(storedGroups).forEach((group: any) => {
         addGroup(group)
       })
-      console.log('恢复分组:', Object.keys(storedGroups).length)
     }
     restoreGroups()
   }, [])
@@ -328,38 +327,6 @@ export default function App() {
     }
   }, [seekTo])
 
-  // ------------------------------
-  // 键盘快捷键
-  // ------------------------------
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl+A 全选
-      if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
-        e.preventDefault()
-        selectAll()
-      }
-      // Delete 删除选中
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (document.activeElement?.tagName === 'INPUT') return
-        const { selectedIds, removeSamples } = useSampleStore.getState()
-        if (selectedIds.size > 0) {
-          removeSamples([...selectedIds])
-        }
-      }
-      // Escape 清除选中
-      if (e.key === 'Escape') {
-        clearSelection()
-      }
-      // 空格键 暂停/播放
-      if (e.key === ' ') {
-        if (document.activeElement?.tagName === 'INPUT') return
-        e.preventDefault()
-        handleTogglePause()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selectAll, clearSelection, handleTogglePause])
 
   // ------------------------------
   // 渲染
@@ -383,7 +350,11 @@ export default function App() {
       <GroupBar />
 
       {/* 多选操作栏（右键菜单触发显示） */}
-      {showSelectionBar && selectedIds.size > 0 && <SelectionBar />}
+      {showSelectionBar && selectedIds.size > 0 && (
+        <Suspense fallback={null}>
+          <SelectionBar />
+        </Suspense>
+      )}
 
       {/* 采样列表（虚拟滚动） */}
       <div

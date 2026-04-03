@@ -28,12 +28,9 @@ export const FolderItem: React.FC<Props> = ({
   const renameInputRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [showDeleteButton, setShowDeleteButton] = useState(false)
-  const [dragStartX, setDragStartX] = useState(0)
   const [touchStartX, setTouchStartX] = useState(0)
-  const [touchStartTime, setTouchStartTime] = useState(0)
-  const containerRef = useRef<HTMLDivElement>(null)
 
-  const { getFolderSamples, openContextMenu, hiddenFolderIds, setSelected, selectedIds } = useSampleStore()
+  const { getFolderSamples, openContextMenu, hiddenFolderIds, setSelected } = useSampleStore()
 
   // 双击进入重命名模式
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
@@ -60,14 +57,10 @@ export const FolderItem: React.FC<Props> = ({
 
   // 点击展开/收起
   const handleClick = useCallback((e: React.MouseEvent) => {
-    console.log('FolderItem handleClick:', folder.id, 'isRenaming:', isRenaming, 'isExpanded:', isExpanded)
     if (isRenaming) {
-      // 重命名模式下不切换展开状态
-      console.log('FolderItem click ignored due to renaming mode')
       return
     }
     e.stopPropagation()
-    console.log('FolderItem calling onToggle:', folder.id)
     onToggle(folder.id)
   }, [folder.id, onToggle, isExpanded, isRenaming])
 
@@ -97,7 +90,6 @@ export const FolderItem: React.FC<Props> = ({
   // 长按拖拽检测（500ms）
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return // 仅左键
-    setDragStartX(e.clientX)
     const timer = setTimeout(() => {
       setIsDragging(true)
     }, 500)
@@ -108,7 +100,6 @@ export const FolderItem: React.FC<Props> = ({
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     const touch = e.touches[0]
     setTouchStartX(touch.clientX)
-    setTouchStartTime(Date.now())
     const timer = setTimeout(() => {
       setIsDragging(true)
     }, 500)
@@ -172,7 +163,6 @@ export const FolderItem: React.FC<Props> = ({
 
   return (
     <div
-      ref={containerRef}
       className={`
         flex items-center gap-2 px-3 py-1.5
         cursor-pointer select-none

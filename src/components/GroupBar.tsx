@@ -79,10 +79,6 @@ export const GroupBar: React.FC = () => {
     })
   }
 
-  const handleCloseContextMenu = () => {
-    setContextMenu(null)
-  }
-
   const handleEditFromContextMenu = (groupId: string) => {
     const group = groups.get(groupId)
     if (group) {

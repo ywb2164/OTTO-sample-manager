@@ -291,13 +291,9 @@ export function useAudioEngine() {
 
   return {
     play,
-    stopPlayback,
     seekTo,
     togglePause,
     preDecodeAll,
-    decodeFile,
-    extractWaveform,
     getWaveform,
-    audioBufferCacheSize: audioBufferCache.size,
   }
 }

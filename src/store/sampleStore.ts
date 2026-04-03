@@ -19,39 +19,6 @@ function extractFolderInfo(filePath: string): {
   return { folderPath, folderName }
 }
 
-// 工具函数：根据样本路径自动创建文件夹结构
-function autoCreateFolders(samples: Sample[]): SampleFolder[] {
-  const folderMap = new Map<string, Sample[]>()
-
-  // 按文件夹路径分组
-  for (const sample of samples) {
-    const { folderPath } = extractFolderInfo(sample.filePath)
-    if (!folderMap.has(folderPath)) {
-      folderMap.set(folderPath, [])
-    }
-    folderMap.get(folderPath)!.push(sample)
-  }
-
-  // 创建文件夹对象
-  const folders: SampleFolder[] = []
-  let order = 0
-
-  for (const [folderPath, folderSamples] of folderMap) {
-    const { folderName } = extractFolderInfo(folderPath + '/dummy')
-    folders.push({
-      id: `folder_${folderPath}`,
-      name: folderName,
-      path: folderPath,
-      sampleIds: folderSamples.map(s => s.id),
-      isExpanded: true,
-      order: order++,
-      isRenaming: false
-    })
-  }
-
-  return folders
-}
-
 interface SampleStore {
   // 数据
   samples: Map<string, Sample>              // id -> Sample
@@ -128,6 +95,7 @@ interface SampleStore {
   setFolderExpanded: (id: string, expanded: boolean) => void
   moveFolder: (fromIndex: number, toIndex: number) => void
   setExpandOnSearch: (value: boolean) => void
+  setFolderClassificationEnabled: (value: boolean) => void
 
   // 隐藏操作
   toggleSampleHidden: (sampleId: string) => void
@@ -145,7 +113,6 @@ interface SampleStore {
   getFolderForSample: (sampleId: string) => SampleFolder | null
   getFlattenedItems: () => (Sample | SampleFolder)[]
   getFolderSamples: (folderId: string) => Sample[]
-  getFolderByPath: (folderPath: string) => SampleFolder | null
 }
 
 export const useSampleStore = create<SampleStore>((set, get) => ({
@@ -295,7 +262,6 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
   }),
 
   addToGroup: (sampleIds, groupId) => set(state => {
-    console.log('[addToGroup] adding samples', sampleIds, 'to group', groupId)
     const samples = new Map(state.samples)
     const groups = new Map(state.groups)
 
@@ -303,7 +269,6 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
       const s = samples.get(sid)
       if (s && !s.groupIds.includes(groupId)) {
         const newGroupIds = [...s.groupIds, groupId]
-        console.log('[addToGroup] sample', sid, 'groupIds:', s.groupIds, '->', newGroupIds)
         samples.set(sid, { ...s, groupIds: newGroupIds })
       }
     }
@@ -311,7 +276,6 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     const group = groups.get(groupId)
     if (group) {
       const newSampleIds = [...new Set([...group.sampleIds, ...sampleIds])]
-      console.log('[addToGroup] group', groupId, 'sampleIds:', group.sampleIds, '->', newSampleIds)
       groups.set(groupId, { ...group, sampleIds: newSampleIds })
     }
 
@@ -319,7 +283,6 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
   }),
 
   removeFromGroup: (sampleIds, groupId) => set(state => {
-    console.log('[removeFromGroup] removing samples', sampleIds, 'from group', groupId)
     const samples = new Map(state.samples)
     const groups = new Map(state.groups)
 
@@ -327,7 +290,6 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
       const s = samples.get(sid)
       if (s) {
         const newGroupIds = s.groupIds.filter(g => g !== groupId)
-        console.log('[removeFromGroup] sample', sid, 'groupIds:', s.groupIds, '->', newGroupIds)
         samples.set(sid, { ...s, groupIds: newGroupIds })
       }
     }
@@ -335,7 +297,6 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     const group = groups.get(groupId)
     if (group) {
       const newSampleIds = group.sampleIds.filter(sid => !sampleIds.includes(sid))
-      console.log('[removeFromGroup] group', groupId, 'sampleIds:', group.sampleIds, '->', newSampleIds)
       groups.set(groupId, {
         ...group,
         sampleIds: newSampleIds
@@ -356,7 +317,6 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     if (wasEmpty && !isEmpty) {
       // 开始搜索：保存当前展开状态
       preSearchExpandedFolderIds = new Set(state.expandedFolderIds)
-      console.log('[setSearchQuery] saving pre-search expanded state:', Array.from(preSearchExpandedFolderIds))
 
       // 如果设置要求展开文件夹，则展开包含匹配样本的文件夹
       if (state.folderSettings.expandOnSearch) {
@@ -383,8 +343,6 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
           }
         }
 
-        console.log('[setSearchQuery] found', filteredSampleIds.size, 'matching samples for keywords:', keywords, 'activeGroupId:', state.activeGroupId)
-
         // 展开包含匹配样本的文件夹
         for (const folder of state.folders.values()) {
           // 获取文件夹中的样本
@@ -394,13 +352,11 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
             expandedFolderIds.add(folder.id)
           }
         }
-        console.log('[setSearchQuery] expanded folders for search:', Array.from(expandedFolderIds))
       }
     } else if (!wasEmpty && isEmpty && state.preSearchExpandedFolderIds) {
       // 清除搜索：恢复之前的展开状态
       expandedFolderIds = new Set(state.preSearchExpandedFolderIds)
       preSearchExpandedFolderIds = null
-      console.log('[setSearchQuery] restoring pre-search expanded state:', Array.from(expandedFolderIds))
     }
 
     return {
@@ -461,11 +417,9 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     return { folders }
   }),
   toggleFolderExpanded: (id) => set(state => {
-    console.log('[toggleFolderExpanded] id:', id, 'currently expanded:', state.expandedFolderIds.has(id))
     const expandedFolderIds = new Set(state.expandedFolderIds)
     if (expandedFolderIds.has(id)) expandedFolderIds.delete(id)
     else expandedFolderIds.add(id)
-    console.log('[toggleFolderExpanded] new set:', Array.from(expandedFolderIds))
     return { expandedFolderIds }
   }),
   setFolderExpanded: (id, expanded) => set(state => {
@@ -525,7 +479,6 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
   getFilteredSamples: () => {
     const { samples, searchQuery, activeGroupId, hiddenSampleIds, hiddenFolderIds, folders } = get()
     let list = [...samples.values()]
-    console.log('[getFilteredSamples] total samples:', list.length, 'searchQuery:', searchQuery, 'activeGroupId:', activeGroupId)
 
     // 第一步：过滤隐藏的样本和隐藏文件夹中的样本
     // 计算隐藏文件夹中的所有样本ID
@@ -543,83 +496,22 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
       if (hiddenFolderSampleIds.has(s.id)) return false
       return true
     })
-    console.log('[getFilteredSamples] after hidden filter:', list.length, 'hiddenSampleIds:', hiddenSampleIds.size, 'hiddenFolderIds:', hiddenFolderIds.size)
 
     if (activeGroupId) {
       list = list.filter(s => s.groupIds.includes(activeGroupId))
-      console.log('[getFilteredSamples] after group filter:', list.length)
     }
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim()
       // 将查询按空格分割为关键词，忽略空关键词
       const keywords = q.split(/\s+/).filter(k => k.length > 0)
-      console.log('[getFilteredSamples] searching for keywords:', keywords, 'in', list.length, 'samples')
-      // 调试：记录匹配情况（限制输出以避免控制台过载）
-      const debugMatches: Array<{id: string, fileName: string, matches: boolean, reason?: string}> = []
-      let matchCount = 0
-      let noMatchCount = 0
 
       list = list.filter(s => {
         const fileNameLower = s.fileName.toLowerCase()
 
         // 检查所有关键词是否都出现在文件名中（忽略扩展名）
-        const matches = keywords.every(keyword =>
-          fileNameLower.includes(keyword)
-        )
-
-        // 为调试收集有限数据（前50个样本）
-        if (debugMatches.length < 50) {
-          debugMatches.push({
-            id: s.id,
-            fileName: s.fileName,
-            matches,
-            reason: matches ? 'allKeywords' : 'missingKeywords'
-          })
-        }
-
-        if (matches) {
-          matchCount++
-        } else {
-          noMatchCount++
-        }
-
-        return matches
+        return keywords.every(keyword => fileNameLower.includes(keyword))
       })
-
-      console.log('[getFilteredSamples] after search filter:', list.length, 'matches,', noMatchCount, 'non-matches')
-
-      // 总是显示调试信息，不仅仅是4或6
-      if (debugMatches.length > 0) {
-        // 显示一些匹配和不匹配的样本
-        const matchedSamples = debugMatches.filter(d => d.matches)
-        const unmatchedSamples = debugMatches.filter(d => !d.matches)
-
-        console.log('[getFilteredSamples] sample matches overview:')
-        if (matchedSamples.length > 0) {
-          console.log('[getFilteredSamples] Matched (first 10):', matchedSamples.slice(0, 10).map(d => ({ fileName: d.fileName, reason: d.reason })))
-        }
-        if (unmatchedSamples.length > 0) {
-          console.log('[getFilteredSamples] Not matched (first 10):', unmatchedSamples.slice(0, 10).map(d => ({ fileName: d.fileName, reason: d.reason })))
-        }
-      }
-
-      // 如果没有匹配，显示一些样本的文件名和路径以调试
-      if (list.length === 0) {
-        console.log('[getFilteredSamples] NO MATCHES for keywords:', keywords)
-        console.log('[getFilteredSamples] Sample fileNames (first 20):',
-          [...samples.values()].slice(0, 20).map(s => ({
-            fileName: s.fileName,
-            fileExt: s.fileExt,
-            filePath: s.filePath
-          })))
-      } else if (list.length > 0) {
-        console.log('[getFilteredSamples] first few matches:', list.slice(0, 5).map(s => ({
-          fileName: s.fileName,
-          fileExt: s.fileExt,
-          filePath: s.filePath
-        })))
-      }
     }
 
     // 按导入时间排序
@@ -648,8 +540,7 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
   },
 
   getFlattenedItems: () => {
-    const { folders, folderOrder, expandedFolderIds, searchQuery, folderSettings, hiddenFolderIds, lastGroupChangeTimestamp } = get()
-    console.log('[getFlattenedItems] searchQuery:', searchQuery, 'folders count:', folders.size, 'expandedFolderIds:', Array.from(expandedFolderIds), 'hiddenFolderIds:', Array.from(hiddenFolderIds))
+    const { folders, folderOrder, expandedFolderIds, folderSettings, hiddenFolderIds } = get()
 
     // 如果文件夹分类被禁用，直接返回按文件名排序的过滤样本
     if (!folderSettings.folderClassificationEnabled) {
@@ -658,7 +549,6 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
       const sortedSamples = filteredSamples.sort((a, b) =>
         a.fileName.localeCompare(b.fileName, undefined, { sensitivity: 'base' })
       )
-      console.log('[getFlattenedItems] folder classification disabled, returning', sortedSamples.length, 'samples sorted by filename')
       return sortedSamples
     }
 
@@ -667,11 +557,9 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     // 获取过滤后的样本（根据搜索和分组）
     const filteredSamples = get().getFilteredSamples()
     const filteredSampleIds = new Set(filteredSamples.map(s => s.id))
-    console.log('[getFlattenedItems] filteredSamples count:', filteredSamples.length, 'filteredSampleIds:', Array.from(filteredSampleIds))
 
     // 直接使用当前的展开状态，搜索时的展开逻辑已在 setSearchQuery 中处理
     const expandedIds = new Set(expandedFolderIds)
-    console.log('[getFlattenedItems] expandedIds:', Array.from(expandedIds), 'searchQuery:', searchQuery)
 
     // 计算所有文件夹中的样本ID（无论是否展开）
     const allFolderSampleIds = new Set<string>()
@@ -683,36 +571,29 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     }
 
     // 按folderOrder顺序遍历文件夹
-    console.log('[getFlattenedItems] folderOrder:', folderOrder)
     for (const folderId of folderOrder) {
       const folder = folders.get(folderId)
       if (!folder) continue
 
       // 跳过隐藏的文件夹
       if (hiddenFolderIds.has(folderId)) {
-        console.log('[getFlattenedItems] skipping hidden folder:', folder.id)
         continue
       }
 
       // 获取文件夹中过滤后的样本
       const folderSamples = get().getFolderSamples(folderId)
       const filteredFolderSamples = folderSamples.filter(s => filteredSampleIds.has(s.id))
-      console.log('[getFlattenedItems] folder:', folder.id, folder.name, 'folderSamples:', folderSamples.length, 'filteredFolderSamples:', filteredFolderSamples.length, 'expandedIds.has:', expandedIds.has(folderId))
 
       // 如果文件夹有匹配的样本，显示文件夹
       if (filteredFolderSamples.length > 0) {
         items.push(folder)
-        console.log('[getFlattenedItems] adding folder to items:', folder.id)
 
         // 如果文件夹展开，添加其过滤后的样本
         if (expandedIds.has(folderId)) {
           // 样本按导入时间排序
           const sortedSamples = filteredFolderSamples.sort((a, b) => a.importedAt - b.importedAt)
-          console.log('[getFlattenedItems] adding folder samples:', sortedSamples.length)
           items.push(...sortedSamples)
         }
-      } else {
-        console.log('[getFlattenedItems] skipping folder (no filtered samples):', folder.id)
       }
     }
 
@@ -720,19 +601,8 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     // 注意：这里只添加不在任何文件夹中的样本
     const orphanSamples = filteredSamples.filter(s => !allFolderSampleIds.has(s.id))
     const sortedOrphanSamples = orphanSamples.sort((a, b) => a.importedAt - b.importedAt)
-    console.log('[getFlattenedItems] orphanSamples:', orphanSamples.length)
     items.push(...sortedOrphanSamples)
-
-    console.log('[getFlattenedItems] total items:', items.length, 'breakdown:', {
-      folders: items.filter(item => 'path' in item).length,
-      samples: items.filter(item => 'filePath' in item).length
-    })
     return items
   },
 
-  getFolderByPath: (folderPath) => {
-    const { folders } = get()
-    const folderId = `folder_${folderPath}`
-    return folders.get(folderId) || null
-  }
 }))
