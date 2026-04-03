@@ -5,9 +5,10 @@ interface Props {
   onImportFiles: () => void
   onImportFolder: () => void
   onRemoveAllImported: () => void
+  isImporting: boolean
 }
 
-export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onRemoveAllImported }) => {
+export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onRemoveAllImported, isImporting }) => {
   const [alwaysOnTop, setAlwaysOnTop] = useState(true)
   const [opacity, setOpacity] = useState(1.0)
   const [enableAutoCopy, setEnableAutoCopy] = useState(true)
@@ -115,12 +116,20 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onRem
         {/* 导入菜单 */}
         <div className="relative">
           <button
-            className="text-xs px-2 py-1 rounded bg-accent-primary hover:bg-accent-light text-white transition-colors"
-            onClick={() => setShowImportMenu(!showImportMenu)}
+            className={`text-xs px-2 py-1 rounded text-white transition-colors ${
+              isImporting
+                ? 'bg-accent-primary/60 cursor-not-allowed'
+                : 'bg-accent-primary hover:bg-accent-light'
+            }`}
+            onClick={() => {
+              if (isImporting) return
+              setShowImportMenu(!showImportMenu)
+            }}
+            disabled={isImporting}
           >
-            导入 ▾
+            {isImporting ? '导入中...' : '导入 ▾'}
           </button>
-          {showImportMenu && (
+          {showImportMenu && !isImporting && (
             <div className="absolute top-full right-0 mt-1 bg-bg-tertiary border border-border rounded shadow-lg z-50 min-w-32">
               <button
                 className="block w-full text-left text-xs px-3 py-2 hover:bg-bg-hover text-text-primary"

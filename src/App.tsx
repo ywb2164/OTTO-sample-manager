@@ -91,9 +91,10 @@ export default function App() {
   } = useSampleStore()
 
   const { currentSampleId, isPlaying } = usePlayerStore()
-  const { play, togglePause, seekTo, preDecodeAll, getWaveform } = useAudioEngine()
+  const { play, togglePause, seekTo, preDecodeAll, getWaveform, primeDecodedSample } = useAudioEngine()
   const folderSettings = useSampleStore(state => state.folderSettings)
   const groups = useSampleStore(state => state.groups)
+  const isImporting = useSampleStore(state => state.isImporting)
 
   const [currentWaveform, setCurrentWaveform] = useState<Float32Array | null>(null)
   const [hasHydratedStore, setHasHydratedStore] = useState(false)
@@ -274,7 +275,7 @@ export default function App() {
   // 导入文件
   // ------------------------------
   const importFiles = useCallback(async (filePaths: string[]) => {
-    if (filePaths.length === 0) return
+    if (filePaths.length === 0 || useSampleStore.getState().isImporting) return
     useSampleStore.getState().setIsImporting(true)
 
     const ctx = new AudioContext()
@@ -282,59 +283,61 @@ export default function App() {
     const existingFilePaths = new Set(Array.from(useSampleStore.getState().samples.values()).map(sample => sample.filePath))
     const targetGroupId = useSampleStore.getState().activeGroupId
 
-    for (const filePath of filePaths) {
-      if (existingFilePaths.has(filePath)) continue
+    try {
+      for (const filePath of filePaths) {
+        if (existingFilePaths.has(filePath)) continue
 
-      try {
-        const arrayBuffer = await window.electronAPI.readFileAsBuffer(filePath)
-        const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
-        const { fileName, fileExt } = getFileNameParts(filePath)
+        try {
+          const arrayBuffer = await window.electronAPI.readFileAsBuffer(filePath)
+          const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
+          const { fileName, fileExt } = getFileNameParts(filePath)
 
-        const sampleId = uuidv4()
+          const sampleId = uuidv4()
 
-        const sample: Sample = {
-          id: sampleId,
-          fileName,
-          fileExt,
-          filePath,
-          folderId: null,
-          originalId: sampleId,
-          isCopy: false,
-          copyIndex: 0,
-          duration: audioBuffer.duration,
-          sampleRate: audioBuffer.sampleRate,
-          channels: audioBuffer.numberOfChannels,
-          fileSize: arrayBuffer.byteLength,
-          groupIds: targetGroupId ? [targetGroupId] : [],
-          importedAt: Date.now(),
-          isDecoded: true,
-          isFileValid: true,
+          const sample: Sample = {
+            id: sampleId,
+            fileName,
+            fileExt,
+            filePath,
+            folderId: null,
+            originalId: sampleId,
+            isCopy: false,
+            copyIndex: 0,
+            duration: audioBuffer.duration,
+            sampleRate: audioBuffer.sampleRate,
+            channels: audioBuffer.numberOfChannels,
+            fileSize: arrayBuffer.byteLength,
+            groupIds: targetGroupId ? [targetGroupId] : [],
+            importedAt: Date.now(),
+            isDecoded: true,
+            isFileValid: true,
+          }
+
+          primeDecodedSample(sampleId, audioBuffer)
+          newSamples.push(sample)
+          existingFilePaths.add(filePath)
+        } catch (e) {
+          console.error(`导入失败: ${filePath}`, e)
         }
-
-        newSamples.push(sample)
-        existingFilePaths.add(filePath)
-      } catch (e) {
-        console.error(`导入失败: ${filePath}`, e)
       }
+
+      addSamples(newSamples)
+
+      setDecodeProgress(null)
+    } finally {
+      ctx.close()
+      useSampleStore.getState().setIsImporting(false)
     }
-
-    ctx.close()
-    addSamples(newSamples)
-    useSampleStore.getState().setIsImporting(false)
-
-    // 后台预解码
-    preDecodeAll(
-      newSamples.map(s => ({ id: s.id, filePath: s.filePath })),
-      (current, total) => setDecodeProgress({ current, total })
-    ).then(() => setDecodeProgress(null))
-  }, [addSamples, preDecodeAll, setDecodeProgress])
+  }, [addSamples, primeDecodedSample, setDecodeProgress])
 
   const handleImportFiles = useCallback(async () => {
+    if (useSampleStore.getState().isImporting) return
     const paths = await window.electronAPI.openFileDialog()
     await importFiles(paths)
   }, [importFiles])
 
   const handleImportFolder = useCallback(async () => {
+    if (useSampleStore.getState().isImporting) return
     const folder = await window.electronAPI.openFolderDialog()
     if (!folder) return
     const scannedRoot = await window.electronAPI.scanFolder(folder)
@@ -384,6 +387,7 @@ export default function App() {
             isFileValid: true,
           }
 
+          primeDecodedSample(sampleId, audioBuffer)
           newSamples.push(sample)
           if (parentFolder) {
             parentFolder.sampleIds.push(sampleId)
@@ -401,15 +405,12 @@ export default function App() {
         targetGroupId,
       })
 
-      preDecodeAll(
-        newSamples.map(s => ({ id: s.id, filePath: s.filePath })),
-        (current, total) => setDecodeProgress({ current, total })
-      ).then(() => setDecodeProgress(null))
+      setDecodeProgress(null)
     } finally {
       ctx.close()
       useSampleStore.getState().setIsImporting(false)
     }
-  }, [importStructuredData, preDecodeAll, setDecodeProgress])
+  }, [importStructuredData, primeDecodedSample, setDecodeProgress])
 
   const handleRemoveAllImported = useCallback(() => {
     const confirmed = window.confirm('确定移除当前导入的全部文件夹和素材吗？\n这不会删除磁盘上的原始文件。')
@@ -430,6 +431,7 @@ export default function App() {
   // 拖文件到窗口导入
   const handleWindowDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
+    if (useSampleStore.getState().isImporting) return
     const paths = Array.from(e.dataTransfer.files)
       // @ts-ignore - File in Electron environment has a path property
       .map((f: any) => (f as any).path)
@@ -567,6 +569,7 @@ export default function App() {
         onImportFiles={handleImportFiles}
         onImportFolder={handleImportFolder}
         onRemoveAllImported={handleRemoveAllImported}
+        isImporting={isImporting}
       />
 
       {/* 搜索栏 */}
@@ -598,9 +601,10 @@ export default function App() {
       )}
 
       {/* 采样列表（虚拟滚动） */}
+      <div className="flex-1 relative overflow-hidden">
       <div
         ref={listRef}
-        className="flex-1 overflow-y-auto overflow-x-hidden"
+        className="h-full overflow-y-auto overflow-x-hidden"
         style={{ contain: 'strict' }}
       >
         {flattenedItems.length === 0 ? (
@@ -670,6 +674,18 @@ export default function App() {
             })}
           </div>
         )}
+      </div>
+      {isImporting && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-bg-primary/70 backdrop-blur-[1px] pointer-events-auto">
+          <div className="flex items-center gap-3 px-4 py-3 rounded-lg border border-border bg-bg-secondary/95 shadow-lg">
+            <div className="w-5 h-5 border-2 border-accent-primary/30 border-t-accent-primary rounded-full animate-spin" />
+            <div className="flex flex-col">
+              <span className="text-sm text-text-primary">入飞门中...</span>
+              <span className="text-xs text-text-dim">飞马正在8bc, 别急</span>
+            </div>
+          </div>
+        </div>
+      )}
       </div>
 
       {/* 底部状态栏/播放器 */}

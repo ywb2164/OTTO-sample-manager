@@ -59,6 +59,14 @@ function getAudioContext(): AudioContext {
   return audioContextInstance
 }
 
+function cacheAudioBuffer(sampleId: string, audioBuffer: AudioBuffer): void {
+  audioBufferCache.set(sampleId, audioBuffer)
+}
+
+function cacheWaveform(sampleId: string, waveform: Float32Array): void {
+  waveformCache.set(sampleId, waveform)
+}
+
 export function useAudioEngine() {
   const currentSourceRef = useRef<AudioBufferSourceNode | null>(null)
   const startTimeRef = useRef<number>(0)       // AudioContext时间戳，播放开始时记录
@@ -81,7 +89,7 @@ export function useAudioEngine() {
       const ctx = getAudioContext()
       const arrayBuffer = await window.electronAPI.readFileAsBuffer(filePath)
       const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
-      audioBufferCache.set(sampleId, audioBuffer)
+      cacheAudioBuffer(sampleId, audioBuffer)
       return audioBuffer
     } catch (e) {
       console.error(`解码失败: ${filePath}`, e)
@@ -113,9 +121,14 @@ export function useAudioEngine() {
       waveform[i] = max
     }
 
-    waveformCache.set(sampleId, waveform)
+    cacheWaveform(sampleId, waveform)
     return waveform
   }, [])
+
+  const primeDecodedSample = useCallback((sampleId: string, audioBuffer: AudioBuffer): Float32Array => {
+    cacheAudioBuffer(sampleId, audioBuffer)
+    return extractWaveform(sampleId, audioBuffer)
+  }, [extractWaveform])
 
   // ------------------------------
   // 批量预解码（后台进行）
@@ -296,5 +309,6 @@ export function useAudioEngine() {
     togglePause,
     preDecodeAll,
     getWaveform,
+    primeDecodedSample,
   }
 }

@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { copyFile, mkdir, readdir, rm } from 'fs/promises'
 import { existsSync } from 'fs'
-import { basename, extname, join } from 'path'
+import { basename, dirname, extname, join } from 'path'
 
 export interface CopySourceItem {
   id: string
@@ -18,37 +18,81 @@ export interface CopyRecord {
 }
 
 const copyRecords = new Map<string, CopyRecord>()
+let resolvedCopiesRoot: string | null = null
 
-function getCopiesRoot(): string {
-  return join(app.getPath('userData'), 'temp_copies')
+function getPreferredCopiesRoot(): string {
+  if (app.isPackaged) {
+    return join(dirname(app.getPath('exe')), 'Copy')
+  }
+
+  return join(app.getAppPath(), 'Copy')
 }
 
-function getCopyDir(originalId: string): string {
-  return join(getCopiesRoot(), originalId)
+function getFallbackCopiesRoot(): string {
+  return join(app.getPath('userData'), 'Copy')
 }
 
-function buildCopyFileName(sourcePath: string, copyIndex: number): string {
+async function resolveCopiesRoot(): Promise<string> {
+  if (resolvedCopiesRoot) {
+    return resolvedCopiesRoot
+  }
+
+  const candidates = [getPreferredCopiesRoot(), getFallbackCopiesRoot()]
+
+  for (const candidate of candidates) {
+    try {
+      await mkdir(candidate, { recursive: true })
+      resolvedCopiesRoot = candidate
+      return candidate
+    } catch {
+      continue
+    }
+  }
+
+  throw new Error('Unable to resolve a writable copy directory')
+}
+
+function sanitizeBaseName(sourcePath: string): string {
   const ext = extname(sourcePath)
   const originalName = basename(sourcePath, ext)
-  return `${originalName}_副本${copyIndex}${ext}`
+  const asciiName = originalName
+    .normalize('NFKD')
+    .replace(/[^\x00-\x7F]/g, '')
+    .replace(/[^A-Za-z0-9_-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase()
+
+  return asciiName || 'sample'
 }
 
-async function getNextCopyIndex(copyDir: string, sourcePath: string): Promise<number> {
-  if (!existsSync(copyDir)) return 1
+function buildCopyPrefix(sourcePath: string, originalId: string): string {
+  const safeName = sanitizeBaseName(sourcePath)
+  const shortId = originalId.replace(/[^A-Za-z0-9]/g, '').slice(0, 8) || 'source'
+  return `${safeName}_${shortId}_copy`
+}
 
+function buildCopyFileName(sourcePath: string, originalId: string, copyIndex: number): string {
   const ext = extname(sourcePath)
-  const originalName = basename(sourcePath, ext)
-  const files = await readdir(copyDir)
+  return `${buildCopyPrefix(sourcePath, originalId)}${copyIndex}${ext.toLowerCase()}`
+}
+
+async function getNextCopyIndex(copiesRoot: string, sourcePath: string, originalId: string): Promise<number> {
+  if (!existsSync(copiesRoot)) return 1
+
+  const ext = extname(sourcePath).toLowerCase()
+  const prefix = buildCopyPrefix(sourcePath, originalId)
+  const files = await readdir(copiesRoot)
 
   let maxIndex = 0
 
   for (const file of files) {
-    if (!file.startsWith(`${originalName}_副本`) || !file.endsWith(ext)) {
+    if (!file.startsWith(prefix) || !file.endsWith(ext)) {
       continue
     }
 
     const indexText = file.slice(
-      `${originalName}_副本`.length,
+      prefix.length,
       file.length - ext.length,
     )
     const index = Number.parseInt(indexText, 10)
@@ -65,11 +109,10 @@ export async function createManagedCopy(item: CopySourceItem): Promise<CopyRecor
     throw new Error(`Source file does not exist: ${item.filePath}`)
   }
 
-  const copyDir = getCopyDir(item.id)
-  await mkdir(copyDir, { recursive: true })
+  const copiesRoot = await resolveCopiesRoot()
 
-  const copyIndex = await getNextCopyIndex(copyDir, item.filePath)
-  const targetPath = join(copyDir, buildCopyFileName(item.filePath, copyIndex))
+  const copyIndex = await getNextCopyIndex(copiesRoot, item.filePath, item.id)
+  const targetPath = join(copiesRoot, buildCopyFileName(item.filePath, item.id, copyIndex))
 
   await copyFile(item.filePath, targetPath)
 
@@ -92,5 +135,6 @@ export function getManagedCopyRecords(): CopyRecord[] {
 
 export async function cleanupManagedCopies(): Promise<void> {
   copyRecords.clear()
-  await rm(getCopiesRoot(), { recursive: true, force: true })
+  await rm(await resolveCopiesRoot(), { recursive: true, force: true })
+  resolvedCopiesRoot = null
 }

@@ -179,6 +179,7 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     const samples = new Map(state.samples)
     const folders = new Map(state.folders)
     const folderOrder = [...state.folderOrder]
+    const existingFilePaths = new Set(Array.from(samples.values()).map((sample) => sample.filePath))
 
     for (const incomingSample of newSamples) {
       const sample = {
@@ -186,8 +187,7 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
         folderId: incomingSample.folderId ?? null,
       }
 
-      const alreadyImported = Array.from(samples.values()).some((existing) => existing.filePath === sample.filePath)
-      if (alreadyImported) continue
+      if (existingFilePaths.has(sample.filePath)) continue
 
       const { folderPath } = extractFolderInfo(sample.filePath)
       const folderId = sample.folderId ?? `folder_${folderPath}`
@@ -203,6 +203,7 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
       }
 
       samples.set(sample.id, sample)
+      existingFilePaths.add(sample.filePath)
       if (!folder.sampleIds.includes(sample.id)) {
         folder.sampleIds.push(sample.id)
       }
@@ -217,6 +218,7 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     const groups = new Map(state.groups)
     const folderOrder = [...state.folderOrder]
     const importedSampleIds: string[] = []
+    const existingFilePaths = new Set(Array.from(samples.values()).map((sample) => sample.filePath))
 
     for (const folder of newFolders) {
       folders.set(folder.id, { ...folder })
@@ -228,10 +230,10 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
         folderId: incomingSample.folderId ?? null,
       }
 
-      const alreadyImported = Array.from(samples.values()).some((existing) => existing.filePath === sample.filePath)
-      if (alreadyImported) continue
+      if (existingFilePaths.has(sample.filePath)) continue
 
       samples.set(sample.id, sample)
+      existingFilePaths.add(sample.filePath)
       importedSampleIds.push(sample.id)
     }
 

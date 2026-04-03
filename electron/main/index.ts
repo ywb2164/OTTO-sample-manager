@@ -19,6 +19,7 @@ const store = new Store({
   defaults: {
     samples: {},
     groups: {},
+    dragCounts: {},
     copySettings: {
       enableAutoCopy: true,
       keepCopies: false,
@@ -243,39 +244,38 @@ ipcMain.on('drag-out-files', async (event, items: Array<{ id: string; filePath: 
 
   const copySettings = (store.get('copySettings') as { enableAutoCopy?: boolean; keepCopies?: boolean } | undefined) ?? {}
   const enableAutoCopy = copySettings.enableAutoCopy ?? true
+  const dragCounts = {
+    ...((store.get('dragCounts') as Record<string, number> | undefined) ?? {})
+  }
 
-  const preparedItems = enableAutoCopy
-    ? await Promise.all(
-        validItems.map(async (item) => {
-          try {
-            const copyRecord = await createManagedCopy(item)
-            return {
-              ...item,
-              targetPath: copyRecord.filePath
-            }
-          } catch {
-            return null
-          }
-        })
-      )
-    : validItems.map((item) => ({
-        ...item,
-        targetPath: item.filePath
-      }))
+  // 当前 startDrag 实际只拖出单个文件，这里只处理真正会被拖出的第一个项目，
+  // 避免为并未拖出的其他选中项增加计数或创建副本。
+  const item = validItems[0]
+  const currentDragCount = dragCounts[item.id] ?? 0
 
-  const availableItems = preparedItems.filter((item): item is { id: string; filePath: string; targetPath: string } => item !== null)
-  if (availableItems.length === 0) return
+  let targetPath = item.filePath
+  if (enableAutoCopy && currentDragCount > 0) {
+    try {
+      const copyRecord = await createManagedCopy(item)
+      targetPath = copyRecord.filePath
+    } catch {
+      return
+    }
+  }
+
+  dragCounts[item.id] = currentDragCount + 1
+  store.set('dragCounts', dragCounts)
 
   const iconPath = app.isPackaged
     ? join(process.resourcesPath, 'resources/drag-icon.png')
     : join(__dirname, '../../resources/drag-icon.png')
 
-  const startDragOptions: any = { file: availableItems[0].targetPath }
+  const startDragOptions: any = { file: targetPath }
   if (existsSync(iconPath) && iconPath.endsWith('.png')) {
     startDragOptions.icon = iconPath
   }
 
-  if (availableItems.length === 1) {
+  if (validItems.length === 1) {
     event.sender.startDrag(startDragOptions)
   } else {
     // Electron's startDrag only officially supports dragging a single file via the `file` property.
