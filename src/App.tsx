@@ -706,7 +706,7 @@ export default function App() {
     const folder = folders.get(folderId)
     if (!folder) return
     const folderSamples = useSampleStore.getState().getFolderSamples(folderId)
-    const confirmed = window.confirm(`确定删除文件夹 "${folder.name}" 及其中的 ${folderSamples.length} 个样本吗？`)
+    const confirmed = window.confirm(`确定删除文件夹 "${folder.name}" 及其中的 ${folderSamples.length} 个样本吗？这不会删除原文件`)
     if (confirmed) {
       removeFolder(folderId)
       // 同时删除文件夹内的所有样本

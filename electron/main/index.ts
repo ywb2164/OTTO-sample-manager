@@ -158,15 +158,13 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   const copySettings = (store.get('copySettings') as { enableAutoCopy?: boolean; keepCopies?: boolean } | undefined) ?? {}
-  if (copySettings.keepCopies) return
+  if (copySettings.keepCopies) {
+    console.debug('[cleanup] preserveCopies=true, skip drag-copies cleanup')
+    return
+  }
 
   try {
-    if (import.meta.env.DEV) {
-      console.debug('[shutdown] skipping transient copy cleanup in dev')
-      return
-    }
-
-    console.debug('[shutdown] cleaning transient drag copies')
+    console.debug('[cleanup] preserveCopies=false, remove drag-copies')
     cleanupManagedCopiesSync()
     store.set('dragCounts', {})
   } catch {
