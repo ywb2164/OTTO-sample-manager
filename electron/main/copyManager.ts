@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { copyFile, mkdir, readdir, rm } from 'fs/promises'
-import { existsSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'fs'
 import { basename, dirname, extname, join } from 'path'
 
 export interface CopySourceItem {
@@ -54,6 +54,26 @@ async function resolveCopiesRoot(): Promise<string> {
   throw new Error('Unable to resolve a writable copy directory')
 }
 
+function resolveCopiesRootSync(): string {
+  if (resolvedCopiesRoot) {
+    return resolvedCopiesRoot
+  }
+
+  const candidates = [getPreferredCopiesRoot(), getFallbackCopiesRoot()]
+
+  for (const candidate of candidates) {
+    try {
+      mkdirSync(candidate, { recursive: true })
+      resolvedCopiesRoot = candidate
+      return candidate
+    } catch {
+      continue
+    }
+  }
+
+  throw new Error('Unable to resolve a writable copy directory')
+}
+
 export async function getCopiesRoot(): Promise<string> {
   return resolveCopiesRoot()
 }
@@ -62,6 +82,13 @@ export async function getManagedCopiesDir(): Promise<string> {
   const root = await resolveCopiesRoot()
   const dir = join(root, TRANSIENT_COPIES_DIR_NAME)
   await mkdir(dir, { recursive: true })
+  return dir
+}
+
+export function getManagedCopiesDirSync(): string {
+  const root = resolveCopiesRootSync()
+  const dir = join(root, TRANSIENT_COPIES_DIR_NAME)
+  mkdirSync(dir, { recursive: true })
   return dir
 }
 
@@ -124,6 +151,30 @@ async function getNextCopyIndex(copiesRoot: string, sourcePath: string, original
   return maxIndex + 1
 }
 
+function getNextCopyIndexSync(copiesRoot: string, sourcePath: string, originalId: string): number {
+  if (!existsSync(copiesRoot)) return 1
+
+  const ext = extname(sourcePath).toLowerCase()
+  const prefix = buildCopyPrefix(sourcePath, originalId)
+  const files = readdirSync(copiesRoot)
+
+  let maxIndex = 0
+
+  for (const file of files) {
+    if (!file.startsWith(prefix) || !file.endsWith(ext)) {
+      continue
+    }
+
+    const indexText = file.slice(prefix.length, file.length - ext.length)
+    const index = Number.parseInt(indexText, 10)
+    if (!Number.isNaN(index)) {
+      maxIndex = Math.max(maxIndex, index)
+    }
+  }
+
+  return maxIndex + 1
+}
+
 export async function createManagedCopy(item: CopySourceItem): Promise<CopyRecord> {
   if (!existsSync(item.filePath)) {
     throw new Error(`Source file does not exist: ${item.filePath}`)
@@ -149,6 +200,30 @@ export async function createManagedCopy(item: CopySourceItem): Promise<CopyRecor
   return record
 }
 
+export function createManagedCopySync(item: CopySourceItem): CopyRecord {
+  if (!existsSync(item.filePath)) {
+    throw new Error(`Source file does not exist: ${item.filePath}`)
+  }
+
+  const copiesRoot = getManagedCopiesDirSync()
+  const copyIndex = getNextCopyIndexSync(copiesRoot, item.filePath, item.id)
+  const targetPath = join(copiesRoot, buildCopyFileName(item.filePath, item.id, copyIndex))
+
+  copyFileSync(item.filePath, targetPath)
+
+  const record: CopyRecord = {
+    id: `${item.id}_copy_${copyIndex}_${Date.now()}`,
+    filePath: targetPath,
+    originalId: item.id,
+    isCopy: true,
+    copyIndex,
+    createdAt: Date.now(),
+  }
+
+  copyRecords.set(record.filePath, record)
+  return record
+}
+
 export function getManagedCopyRecords(): CopyRecord[] {
   return [...copyRecords.values()]
 }
@@ -156,4 +231,17 @@ export function getManagedCopyRecords(): CopyRecord[] {
 export async function cleanupManagedCopies(): Promise<void> {
   copyRecords.clear()
   await rm(await getManagedCopiesDir(), { recursive: true, force: true })
+}
+
+export function cleanupManagedCopiesSync(): void {
+  copyRecords.clear()
+
+  const roots = [getPreferredCopiesRoot(), getFallbackCopiesRoot()]
+  for (const root of roots) {
+    try {
+      rmSync(join(root, TRANSIENT_COPIES_DIR_NAME), { recursive: true, force: true })
+    } catch {
+      // ignore cleanup errors during shutdown
+    }
+  }
 }

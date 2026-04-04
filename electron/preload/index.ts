@@ -22,7 +22,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternalLink: (url: string) => ipcRenderer.send('open-external-link', url),
   
   // 拖拽
-  dragOutFiles: (items: Array<{ id: string; filePath: string }>) => ipcRenderer.send('drag-out-files', items),
+  dragOutFiles: (filePaths: string[]) => {
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug('[drag-out][preload]', filePaths)
+    }
+    ipcRenderer.send('drag-out-files', filePaths)
+  },
   
   // 持久化存储
   storeGet: (key: string) => ipcRenderer.invoke('store-get', key),
@@ -64,7 +69,7 @@ declare global {
       validateFiles: (filePaths: string[]) => Promise<{ path: string; valid: boolean }[]>
       showInExplorer: (filePath: string) => void
       openExternalLink: (url: string) => void
-      dragOutFiles: (items: Array<{ id: string; filePath: string }>) => void
+      dragOutFiles: (filePaths: string[]) => void
       storeGet: (key: string) => Promise<unknown>
       storeSet: (key: string, value: unknown) => void
       storeDelete: (key: string) => void

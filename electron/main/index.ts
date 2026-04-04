@@ -1,8 +1,8 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, nativeImage, shell } from 'electron'
 import { join } from 'path'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'fs'
 import Store from 'electron-store'
-import { cleanupManagedCopies, createManagedCopy, getLyricsAssembliesDir } from './copyManager'
+import { cleanupManagedCopiesSync, createManagedCopySync, getLyricsAssembliesDir } from './copyManager'
 
 interface ScannedFolderNode {
   name: string
@@ -36,6 +36,63 @@ const store = new Store({
 })
 
 let mainWindow: BrowserWindow | null = null
+const FALLBACK_DRAG_ICON_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn7L6kAAAAASUVORK5CYII='
+
+function createFallbackDragIcon() {
+  return nativeImage.createFromDataURL(FALLBACK_DRAG_ICON_DATA_URL).resize({ width: 32, height: 32 })
+}
+
+function resolveDragIcon() {
+  const candidates = app.isPackaged
+    ? [
+        join(process.resourcesPath, 'resources/drag-icon.png'),
+        join(process.resourcesPath, 'resources/icon.png'),
+      ]
+    : [
+        join(app.getAppPath(), 'resources/drag-icon.png'),
+        join(app.getAppPath(), 'resources/icon.png'),
+        join(app.getAppPath(), 'build/icon.png'),
+      ]
+
+  for (const iconPath of candidates) {
+    try {
+      const exists = existsSync(iconPath)
+      if (import.meta.env.DEV) {
+        console.debug('[drag icon] trying path=', iconPath)
+        console.debug('[drag icon] file exists=', exists)
+      }
+      if (!exists) continue
+
+      const icon = nativeImage.createFromPath(iconPath)
+      if (import.meta.env.DEV) {
+        console.debug('[drag icon] isEmpty=', icon.isEmpty())
+        console.debug('[drag icon] size=', icon.getSize())
+      }
+      if (!icon.isEmpty()) {
+        if (import.meta.env.DEV) {
+          console.debug('[drag icon] using png file')
+        }
+        return icon
+      }
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.debug('[drag icon] failed to load path=', iconPath, error)
+      }
+    }
+  }
+
+  if (import.meta.env.DEV) {
+    console.debug('[drag icon] fallback to generated native image')
+  }
+  const fallbackIcon = createFallbackDragIcon()
+  if (import.meta.env.DEV) {
+    console.debug('[drag icon] fallback dataUrl=', FALLBACK_DRAG_ICON_DATA_URL)
+    console.debug('[drag icon] isEmpty=', fallbackIcon.isEmpty())
+    console.debug('[drag icon] size=', fallbackIcon.getSize())
+  }
+  return fallbackIcon
+}
 
 // ------------------------------
 // 创建主窗口
@@ -99,12 +156,19 @@ app.whenReady().then(() => {
   })
 })
 
-app.on('before-quit', async () => {
+app.on('before-quit', () => {
   const copySettings = (store.get('copySettings') as { enableAutoCopy?: boolean; keepCopies?: boolean } | undefined) ?? {}
   if (copySettings.keepCopies) return
 
   try {
-    await cleanupManagedCopies()
+    if (import.meta.env.DEV) {
+      console.debug('[shutdown] skipping transient copy cleanup in dev')
+      return
+    }
+
+    console.debug('[shutdown] cleaning transient drag copies')
+    cleanupManagedCopiesSync()
+    store.set('dragCounts', {})
   } catch {
     // 清理失败时不阻塞退出
   }
@@ -249,61 +313,59 @@ ipcMain.on('open-external-link', (_, url: string) => {
 // ------------------------------
 // 原生文件拖拽（核心功能）
 // ------------------------------
-ipcMain.on('drag-out-files', async (event, items: Array<{ id: string; filePath: string }>) => {
-  // 验证所有文件存在
-  const validItems = items.filter(item => existsSync(item.filePath))
-  if (import.meta.env.DEV) {
-    console.debug('[drag-out][main] incoming', items)
-    console.debug('[drag-out][main] valid', validItems)
-  }
-  if (validItems.length === 0) return
-
-  const copySettings = (store.get('copySettings') as { enableAutoCopy?: boolean; keepCopies?: boolean } | undefined) ?? {}
-  const enableAutoCopy = copySettings.enableAutoCopy ?? true
-  const dragCounts = {
-    ...((store.get('dragCounts') as Record<string, number> | undefined) ?? {})
-  }
-
-  // 当前 startDrag 实际只拖出单个文件，这里只处理真正会被拖出的第一个项目，
-  // 避免为并未拖出的其他选中项增加计数或创建副本。
-  const item = validItems[0]
-  const currentDragCount = dragCounts[item.id] ?? 0
-
-  let targetPath = item.filePath
-  if (enableAutoCopy && currentDragCount > 0) {
-    try {
-      const copyRecord = await createManagedCopy(item)
-      targetPath = copyRecord.filePath
-    } catch {
-      return
+ipcMain.on('drag-out-files', (event, filePaths: string[]) => {
+  try {
+    const validPaths = filePaths.filter(filePath => existsSync(filePath))
+    if (import.meta.env.DEV) {
+      console.debug('[drag-out][main] incoming', filePaths)
+      console.debug('[drag-out][main] valid', validPaths)
     }
-  }
+    if (validPaths.length === 0) return
 
-  dragCounts[item.id] = currentDragCount + 1
-  store.set('dragCounts', dragCounts)
+    const originalPath = validPaths[0]
+    const copySettings = (store.get('copySettings') as { enableAutoCopy?: boolean; keepCopies?: boolean } | undefined) ?? {}
+    const enableAutoCopy = copySettings.enableAutoCopy ?? true
+    const dragCounts = {
+      ...((store.get('dragCounts') as Record<string, number> | undefined) ?? {})
+    }
 
-  const iconPath = app.isPackaged
-    ? join(process.resourcesPath, 'resources/drag-icon.png')
-    : join(__dirname, '../../resources/drag-icon.png')
+    const currentDragCount = dragCounts[originalPath] ?? 0
+    const useOriginal = !enableAutoCopy || currentDragCount === 0
 
-  const startDragOptions: any = { file: targetPath }
-  if (existsSync(iconPath) && iconPath.endsWith('.png')) {
-    startDragOptions.icon = iconPath
-  }
+    let targetPath = originalPath
+    if (!useOriginal) {
+      const copyRecord = createManagedCopySync({
+        id: originalPath,
+        filePath: originalPath,
+      })
+      targetPath = copyRecord.filePath
+    }
 
-  if (import.meta.env.DEV) {
-    console.debug('[drag-out][main] startDrag', startDragOptions)
-  }
+    dragCounts[originalPath] = currentDragCount + 1
+    store.set('dragCounts', dragCounts)
 
-  if (validItems.length === 1) {
+    if (import.meta.env.DEV) {
+      console.debug('[drag policy] sampleKey=', originalPath)
+      console.debug('[drag policy] dragCount=', currentDragCount)
+      console.debug('[drag policy] autoCopyEnabled=', enableAutoCopy)
+      console.debug('[drag policy] useOriginal=', useOriginal)
+      console.debug('[drag policy] chosenPath=', targetPath)
+    }
+
+    const dragIcon = resolveDragIcon()
+    const startDragOptions = {
+      file: targetPath,
+      icon: dragIcon,
+    }
+
+    if (import.meta.env.DEV) {
+      console.debug('[drag-out][main] startDrag', startDragOptions)
+    }
+
+    // 回归 1.0.0：当前仍只拖出第一个有效文件
     event.sender.startDrag(startDragOptions)
-  } else {
-    // Electron's startDrag only officially supports dragging a single file via the `file` property.
-    // To drag multiple files, you would typically need to rely on native drag and drop mechanisms
-    // or create a temporary archive. For now, we will just drag the first file if multiple are selected,
-    // or you can implement a more complex multi-file drag solution if your OS supports it via custom formats.
-    // This fixes the TypeScript error where `files` is not a property of `Item`.
-    event.sender.startDrag(startDragOptions)
+  } catch (error) {
+    console.error('[drag-out][main] startDrag failed', error)
   }
 })
 

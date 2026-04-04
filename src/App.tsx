@@ -96,7 +96,7 @@ export default function App() {
   } = useSampleStore()
 
   const { currentSampleId, isPlaying } = usePlayerStore()
-  const { play, togglePause, seekTo, preDecodeAll, getWaveform, primeDecodedSample, getCacheStats } = useAudioEngine()
+  const { play, togglePause, seekTo, preDecodeAll, getWaveform, primeDecodedSample, getCacheStats, beginShutdown } = useAudioEngine()
   const folderSettings = useSampleStore(state => state.folderSettings)
   const groups = useSampleStore(state => state.groups)
   const isImporting = useSampleStore(state => state.isImporting)
@@ -333,6 +333,19 @@ export default function App() {
       window.clearTimeout(timer)
     }
   }, [getCacheStats, hasHydratedStore, preDecodeAll, preloadTargets, setDecodeProgress])
+
+  useEffect(() => {
+    const handleShutdown = () => {
+      beginShutdown()
+      setDecodeProgress(null)
+    }
+
+    window.addEventListener('beforeunload', handleShutdown)
+
+    return () => {
+      window.removeEventListener('beforeunload', handleShutdown)
+    }
+  }, [beginShutdown, setDecodeProgress])
 
   useEffect(() => {
     if (!hasHydratedStore) {

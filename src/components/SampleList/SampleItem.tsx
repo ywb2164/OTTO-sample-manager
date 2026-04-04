@@ -36,46 +36,23 @@ export const SampleItem: React.FC<Props> = ({
 
   // 拖出到DAW
   const handleDragStart = useCallback((e: React.DragEvent) => {
-    if (!sample.isFileValid) {
-      return
-    }
-
-    e.dataTransfer.effectAllowed = 'copy'
-    try {
-      e.dataTransfer.setData('text/plain', sample.filePath)
-    } catch {
-      // 浏览器默认数据不是必须项，失败时继续走 Electron startDrag
-    }
+    e.preventDefault()
 
     const { selectedIds } = useSampleStore.getState()
     
     // 如果拖的是选中集合里的一个，则拖出所有选中的
     // 如果拖的不在选中集合里，则只拖这一个
-    let dragItems: Array<{ id: string; filePath: string }>
+    let dragPaths: string[]
     if (selectedIds.has(sample.id) && selectedIds.size > 1) {
       const { samples } = useSampleStore.getState()
-      dragItems = [...selectedIds]
-        .map(id => {
-          const selectedSample = samples.get(id)
-          if (!selectedSample) return null
-          return {
-            id: selectedSample.originalId || selectedSample.id,
-            filePath: selectedSample.filePath
-          }
-        })
-        .filter((item): item is { id: string; filePath: string } => item !== null)
+      dragPaths = [...selectedIds]
+        .map(id => samples.get(id)?.filePath)
+        .filter(Boolean) as string[]
     } else {
-      dragItems = [{
-        id: sample.originalId || sample.id,
-        filePath: sample.filePath
-      }]
+      dragPaths = [sample.filePath]
     }
     
-    if (import.meta.env.DEV) {
-      console.debug('[drag-out][renderer]', dragItems)
-    }
-
-    window.electronAPI.dragOutFiles(dragItems)
+    window.electronAPI.dragOutFiles(dragPaths)
   }, [sample])
 
   // 右键菜单
