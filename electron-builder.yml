@@ -2,7 +2,7 @@ appId: com.electron.app
 productName: 采样管理器
 copyright: Copyright © 2024
 directories:
-  buildResources: build
+  buildResources: resources
   output: ../sample-manager-release
 asar: true
 files:
@@ -33,7 +33,7 @@ extraResources:
     to: resources/drag-icon.png
 win:
   executableName: sample-manager
-  icon: build/icon.ico
+  icon: icon.ico
   target:
     - target: nsis
       arch:
@@ -44,9 +44,9 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  installerIcon: build/icon.ico
-  uninstallerIcon: build/icon.ico
-  installerHeaderIcon: build/icon.ico
+  installerIcon: icon.ico
+  uninstallerIcon: icon.ico
+  installerHeaderIcon: icon.ico
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}

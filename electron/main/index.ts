@@ -252,6 +252,10 @@ ipcMain.on('open-external-link', (_, url: string) => {
 ipcMain.on('drag-out-files', async (event, items: Array<{ id: string; filePath: string }>) => {
   // 验证所有文件存在
   const validItems = items.filter(item => existsSync(item.filePath))
+  if (import.meta.env.DEV) {
+    console.debug('[drag-out][main] incoming', items)
+    console.debug('[drag-out][main] valid', validItems)
+  }
   if (validItems.length === 0) return
 
   const copySettings = (store.get('copySettings') as { enableAutoCopy?: boolean; keepCopies?: boolean } | undefined) ?? {}
@@ -285,6 +289,10 @@ ipcMain.on('drag-out-files', async (event, items: Array<{ id: string; filePath: 
   const startDragOptions: any = { file: targetPath }
   if (existsSync(iconPath) && iconPath.endsWith('.png')) {
     startDragOptions.icon = iconPath
+  }
+
+  if (import.meta.env.DEV) {
+    console.debug('[drag-out][main] startDrag', startDragOptions)
   }
 
   if (validItems.length === 1) {

@@ -36,8 +36,17 @@ export const SampleItem: React.FC<Props> = ({
 
   // 拖出到DAW
   const handleDragStart = useCallback((e: React.DragEvent) => {
-    e.preventDefault()  // 阻止浏览器默认拖拽
-    
+    if (!sample.isFileValid) {
+      return
+    }
+
+    e.dataTransfer.effectAllowed = 'copy'
+    try {
+      e.dataTransfer.setData('text/plain', sample.filePath)
+    } catch {
+      // 浏览器默认数据不是必须项，失败时继续走 Electron startDrag
+    }
+
     const { selectedIds } = useSampleStore.getState()
     
     // 如果拖的是选中集合里的一个，则拖出所有选中的
@@ -62,6 +71,10 @@ export const SampleItem: React.FC<Props> = ({
       }]
     }
     
+    if (import.meta.env.DEV) {
+      console.debug('[drag-out][renderer]', dragItems)
+    }
+
     window.electronAPI.dragOutFiles(dragItems)
   }, [sample])
 
