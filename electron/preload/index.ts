@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setAlwaysOnTop: (value: boolean) => ipcRenderer.send('window-set-always-on-top', value),
   getOpacity: () => ipcRenderer.invoke('window-get-opacity'),
   setOpacity: (value: number) => ipcRenderer.send('window-set-opacity', value),
+  getAppVersion: () => ipcRenderer.invoke('app-get-version'),
   
   // 文件操作
   openFileDialog: () => ipcRenderer.invoke('dialog-open-files'),
@@ -41,7 +42,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createLyricsFiles: (payload: {
     targetGroupName: string
     items: Array<{ id: string; sourcePath: string; fileName: string }>
-  }) => ipcRenderer.invoke('lyrics-create-files', payload)
+  }) => ipcRenderer.invoke('lyrics-create-files', payload),
+  checkForUpdates: (options?: { silentIfNoUpdate?: boolean; showErrors?: boolean }) =>
+    ipcRenderer.invoke('app-check-for-updates', options)
 })
 
 // TypeScript类型声明
@@ -61,6 +64,7 @@ declare global {
       setAlwaysOnTop: (value: boolean) => void
       getOpacity: () => Promise<number>
       setOpacity: (value: number) => void
+      getAppVersion: () => Promise<string>
       openFileDialog: () => Promise<string[]>
       openFolderDialog: () => Promise<string | null>
       openLyricsFileDialog: () => Promise<string | null>
@@ -82,6 +86,10 @@ declare global {
         failed: Array<{ id: string; sourcePath: string; reason: string }>
         targetDir: string
       }>
+      checkForUpdates: (options?: {
+        silentIfNoUpdate?: boolean
+        showErrors?: boolean
+      }) => Promise<void>
     }
   }
 }

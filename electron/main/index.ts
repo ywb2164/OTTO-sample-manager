@@ -3,6 +3,7 @@ import { join } from 'path'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'fs'
 import Store from 'electron-store'
 import { cleanupManagedCopiesSync, createManagedCopySync, getLyricsAssembliesDir } from './copyManager'
+import { JsonUpdateService } from './services/updateService'
 
 interface ScannedFolderNode {
   name: string
@@ -36,8 +37,15 @@ const store = new Store({
 })
 
 let mainWindow: BrowserWindow | null = null
+const UPDATE_MANIFEST_URL =
+  'https://raw.githubusercontent.com/ywb2164/OTTO-sample-manager/main/docs/update/latest.json'
 const FALLBACK_DRAG_ICON_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn7L6kAAAAASUVORK5CYII='
+
+const updateService = new JsonUpdateService({
+  manifestUrl: UPDATE_MANIFEST_URL,
+  getWindow: () => mainWindow,
+})
 
 function createFallbackDragIcon() {
   return nativeImage.createFromDataURL(FALLBACK_DRAG_ICON_DATA_URL).resize({ width: 32, height: 32 })
@@ -150,6 +158,10 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   createWindow()
+  void updateService.checkForUpdates({
+    silentIfNoUpdate: true,
+    showErrors: false,
+  })
   
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -192,6 +204,10 @@ ipcMain.handle('window-get-always-on-top', () => {
 
 ipcMain.handle('window-get-opacity', () => {
   return mainWindow?.getOpacity() ?? 1.0
+})
+
+ipcMain.handle('app-get-version', () => {
+  return app.getVersion()
 })
 
 ipcMain.on('window-set-always-on-top', (_, value: boolean) => {
@@ -306,6 +322,13 @@ ipcMain.on('show-in-explorer', (_, filePath: string) => {
 
 ipcMain.on('open-external-link', (_, url: string) => {
   shell.openExternal(url)
+})
+
+ipcMain.handle('app-check-for-updates', async (_, options?: {
+  silentIfNoUpdate?: boolean
+  showErrors?: boolean
+}) => {
+  await updateService.checkForUpdates(options)
 })
 
 // ------------------------------

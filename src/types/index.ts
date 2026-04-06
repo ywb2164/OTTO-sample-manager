@@ -93,9 +93,3 @@ export interface ImportResult {
   success: Sample[]
   failed: string[]        // 导入失败的路径
 }
-
-declare global {
-  interface Window {
-    electronAPI: any
-  }
-}

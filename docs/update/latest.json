@@ -1,0 +1,9 @@
+{
+  "latestVersion": "2.2.2",
+  "downloadUrlWindows": "https://github.com/ywb2164/OTTO-sample-manager/releases/download/v2.2.1/sample-manager-2.2.1-setup.exe",
+  "notes": [
+    "优化 lazy decode",
+    "修复重复导入卡顿",
+    "改进缓存逻辑"
+  ]
+}
