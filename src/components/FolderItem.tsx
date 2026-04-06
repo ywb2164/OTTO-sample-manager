@@ -30,7 +30,13 @@ export const FolderItem: React.FC<Props> = ({
   const [showDeleteButton, setShowDeleteButton] = useState(false)
   const [touchStartX, setTouchStartX] = useState(0)
 
-  const { getFolderSamples, openContextMenu, hiddenFolderIds, setSelected, selectedIds } = useSampleStore()
+  const openContextMenu = useSampleStore((state) => state.openContextMenu)
+  const setSelected = useSampleStore((state) => state.setSelected)
+  const selectedIds = useSampleStore((state) => state.selectedIds)
+  const isHidden = useSampleStore((state) => state.hiddenFolderIds.has(folder.id))
+  const sampleCount = useSampleStore((state) => state.getFolderSampleCount(folder.id))
+  const selectedCount = useSampleStore((state) => state.getFolderSelectedCount(folder.id))
+  const folderSampleIds = useSampleStore((state) => state.getFolderSampleIds(folder.id))
 
   // 双击进入重命名模式
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
@@ -147,21 +153,15 @@ export const FolderItem: React.FC<Props> = ({
     e.preventDefault()
     e.stopPropagation()
     // 选中文件夹内的所有样本
-    const folderSamples = getFolderSamples(folder.id)
-    const sampleIds = folderSamples.map(s => s.id)
+    const sampleIds = useSampleStore.getState().getFolderSampleIds(folder.id)
     if (sampleIds.length > 0) {
       setSelected(new Set(sampleIds))
     }
     openContextMenu('folder', folder.id, e.clientX, e.clientY)
-  }, [folder.id, openContextMenu, getFolderSamples, setSelected])
+  }, [folder.id, openContextMenu, setSelected])
 
   // 检查文件夹是否隐藏
-  const isHidden = hiddenFolderIds.has(folder.id)
-
-  const folderSamples = getFolderSamples(folder.id)
-  const sampleCount = folderSamples.length
-  const folderSampleIds = folderSamples.map(sample => sample.id)
-  const isChecked = folderSampleIds.length > 0 && folderSampleIds.every(id => selectedIds.has(id))
+  const isChecked = sampleCount > 0 && selectedCount === sampleCount
   const leftPadding = 12 + folder.depth * 16
 
   const handleCheckboxChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {

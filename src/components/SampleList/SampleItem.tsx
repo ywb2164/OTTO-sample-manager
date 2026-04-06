@@ -17,8 +17,19 @@ export const SampleItem: React.FC<Props> = ({
   onPlay,
   onSelect,
 }) => {
-  const { anchorId, getOrderedIds, selectRange, getFolderForSample, setSelected, selectedIds } = useSampleStore()
-  const groups = useSampleStore(s => s.groups)
+  const anchorId = useSampleStore((state) => state.anchorId)
+  const getOrderedIds = useSampleStore((state) => state.getOrderedIds)
+  const selectRange = useSampleStore((state) => state.selectRange)
+  const setSelected = useSampleStore((state) => state.setSelected)
+  const selectedIds = useSampleStore((state) => state.selectedIds)
+  const folder = useSampleStore((state) => state.getFolderForSample(sample.id))
+  const isHidden = useSampleStore((state) => (
+    state.hiddenSampleIds.has(sample.id) ||
+    Boolean(folder && state.hiddenFolderIds.has(folder.id))
+  ))
+  const groupNames = useSampleStore((state) => sample.groupIds
+    .map((groupId) => state.groups.get(groupId)?.name)
+    .filter((name): name is string => Boolean(name)))
 
   // 点击处理（单击=选中+播放，Shift/Ctrl修饰键=多选）
   const handleClick = useCallback((e: React.MouseEvent) => {
@@ -56,9 +67,7 @@ export const SampleItem: React.FC<Props> = ({
   }, [sample])
 
   // 右键菜单
-  const openContextMenu = useSampleStore(s => s.openContextMenu)
-  const hiddenSampleIds = useSampleStore(s => s.hiddenSampleIds)
-  const hiddenFolderIds = useSampleStore(s => s.hiddenFolderIds)
+  const openContextMenu = useSampleStore((state) => state.openContextMenu)
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -70,13 +79,7 @@ export const SampleItem: React.FC<Props> = ({
   }, [sample.id, openContextMenu, selectedIds, setSelected])
 
   // 检查是否隐藏：样本本身隐藏或其所在文件夹隐藏
-  const folder = getFolderForSample(sample.id)
-  const isHidden = hiddenSampleIds.has(sample.id) || (folder ? hiddenFolderIds.has(folder.id) : false)
   const leftPadding = 28 + ((folder?.depth ?? -1) + 1) * 16
-
-  const groupNames = sample.groupIds
-    .map(gid => groups.get(gid)?.name)
-    .filter(Boolean)
 
   const formatDuration = (s: number) => {
     if (!Number.isFinite(s) || s <= 0) return '--'

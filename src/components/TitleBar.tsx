@@ -16,7 +16,13 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onAss
   const [keepCopies, setKeepCopies] = useState(false)
   const [showImportMenu, setShowImportMenu] = useState(false)
   const [showSettingsMenu, setShowSettingsMenu] = useState(false)
-  const { folderSettings, setExpandOnSearch, setFolderClassificationEnabled, setMemoryOptimizationMode } = useSampleStore()
+  const {
+    folderSettings,
+    setExpandOnSearch,
+    setFolderClassificationEnabled,
+    setMemoryOptimizationMode,
+    setEnableChinesePinyinFuzzySearch,
+  } = useSampleStore()
 
   useEffect(() => {
     window.electronAPI.getAlwaysOnTop().then(setAlwaysOnTop)
@@ -201,6 +207,18 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onAss
                 />
                 <span>按文件夹分类</span>
               </label>
+              <div className="border-t border-border my-2"></div>
+              <label className="flex items-center gap-2 text-xs text-text-primary cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={folderSettings.enableChinesePinyinFuzzySearch}
+                  onChange={(e) => setEnableChinesePinyinFuzzySearch(e.target.checked)}
+                />
+                <span>Chinese fuzzy search</span>
+              </label>
+              <div className="text-[11px] text-text-dim mt-1 leading-4">
+                Only expands Chinese queries to same-pinyin Chinese file names. Pure pinyin file names stay out.
+              </div>
               <div className="border-t border-border my-2"></div>
               <label className="flex items-center gap-2 text-xs text-text-primary cursor-pointer">
                 <input

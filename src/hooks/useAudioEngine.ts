@@ -1,14 +1,13 @@
 import { useRef, useCallback } from 'react'
 import { usePlayerStore } from '@/store/playerStore'
 import { useSampleStore } from '@/store/sampleStore'
+import { audioRuntimeCache } from '@/services/audioRuntimeCache'
 
 const AUDIO_BUFFER_CACHE_LIMIT_BYTES = 200 * 1024 * 1024
 const WAVEFORM_CACHE_LIMIT_BYTES = 50 * 1024 * 1024
 const isDev = import.meta.env.DEV
 let isShuttingDown = false
 let shutdownSummaryLogged = false
-const pendingDecodePromises = new Map<string, Promise<AudioBuffer | null>>()
-const pendingWaveformPromises = new Map<string, Promise<Float32Array | null>>()
 
 type CacheEntry<V> = {
   value: V
@@ -156,12 +155,7 @@ function cacheWaveform(sampleId: string, waveform: Float32Array): void {
 }
 
 function getCacheStatsSnapshot() {
-  return {
-    audioBufferCacheCount: audioBufferCache.getStats().count,
-    audioBufferCacheBytes: audioBufferCache.getStats().bytes,
-    waveformCacheCount: waveformCache.getStats().count,
-    waveformCacheBytes: waveformCache.getStats().bytes,
-  }
+  return audioRuntimeCache.getStats()
 }
 
 export function useAudioEngine() {
@@ -178,7 +172,7 @@ export function useAudioEngine() {
       return null
     }
 
-    const cached = audioBufferCache.get(sampleId)
+    const cached = audioRuntimeCache.getAudioBuffer(sampleId)
     if (cached) {
       return cached
     }
@@ -193,7 +187,7 @@ export function useAudioEngine() {
       if (isShuttingDown) {
         return null
       }
-      cacheAudioBuffer(sampleId, audioBuffer)
+      audioRuntimeCache.setAudioBuffer(sampleId, audioBuffer)
       useSampleStore.getState().updateSample(sampleId, {
         duration: audioBuffer.duration,
         sampleRate: audioBuffer.sampleRate,
@@ -208,7 +202,7 @@ export function useAudioEngine() {
   }, [])
 
   const extractWaveform = useCallback((sampleId: string, audioBuffer: AudioBuffer): Float32Array => {
-    const cached = waveformCache.get(sampleId)
+    const cached = audioRuntimeCache.getWaveform(sampleId)
     if (cached) {
       return cached
     }
@@ -233,7 +227,7 @@ export function useAudioEngine() {
       waveform[i] = max
     }
 
-    cacheWaveform(sampleId, waveform)
+    audioRuntimeCache.setWaveform(sampleId, waveform)
     return waveform
   }, [])
 
@@ -245,21 +239,21 @@ export function useAudioEngine() {
       return null
     }
 
-    const cached = audioBufferCache.get(sampleId)
+    const cached = audioRuntimeCache.getAudioBuffer(sampleId)
     if (cached) {
       return cached
     }
 
-    const pending = pendingDecodePromises.get(sampleId)
+    const pending = audioRuntimeCache.getPendingDecode(sampleId)
     if (pending) {
       return pending
     }
 
     const decodePromise = decodeFile(sampleId, filePath).finally(() => {
-      pendingDecodePromises.delete(sampleId)
+      audioRuntimeCache.clearPendingDecode(sampleId)
     })
 
-    pendingDecodePromises.set(sampleId, decodePromise)
+    audioRuntimeCache.setPendingDecode(sampleId, decodePromise)
     return decodePromise
   }, [decodeFile])
 
@@ -271,12 +265,12 @@ export function useAudioEngine() {
       return null
     }
 
-    const cached = waveformCache.get(sampleId)
+    const cached = audioRuntimeCache.getWaveform(sampleId)
     if (cached) {
       return cached
     }
 
-    const pending = pendingWaveformPromises.get(sampleId)
+    const pending = audioRuntimeCache.getPendingWaveform(sampleId)
     if (pending) {
       return pending
     }
@@ -290,10 +284,10 @@ export function useAudioEngine() {
         return extractWaveform(sampleId, audioBuffer)
       })
       .finally(() => {
-        pendingWaveformPromises.delete(sampleId)
+        audioRuntimeCache.clearPendingWaveform(sampleId)
       })
 
-    pendingWaveformPromises.set(sampleId, waveformPromise)
+    audioRuntimeCache.setPendingWaveform(sampleId, waveformPromise)
     return waveformPromise
   }, [ensureDecodedSample, extractWaveform])
 
@@ -328,7 +322,7 @@ export function useAudioEngine() {
     startTimeRef.current = ctx.currentTime
     startOffsetRef.current = safeOffset
     isPlayingRef.current = true
-    pinnedSampleIds.add(sampleId)
+    audioRuntimeCache.pinSample(sampleId)
 
     setCurrentSampleId(sampleId)
     setCurrentFilePath(filePath)
@@ -338,7 +332,7 @@ export function useAudioEngine() {
     source.onended = () => {
       if (isPlayingRef.current) {
         isPlayingRef.current = false
-        pinnedSampleIds.delete(sampleId)
+        audioRuntimeCache.unpinSample(sampleId)
         setIsPlaying(false)
         setCurrentTime(0)
         cancelAnimationFrame(animFrameRef.current)
@@ -370,7 +364,7 @@ export function useAudioEngine() {
 
     const currentSampleId = usePlayerStore.getState().currentSampleId
     if (currentSampleId) {
-      pinnedSampleIds.delete(currentSampleId)
+      audioRuntimeCache.unpinSample(currentSampleId)
     }
 
     if (currentSourceRef.current) {
@@ -421,12 +415,10 @@ export function useAudioEngine() {
   }, [play, stopPlayback, setCurrentTime])
 
   const getWaveform = useCallback((sampleId: string): Float32Array | null => {
-    return waveformCache.get(sampleId) ?? null
+    return audioRuntimeCache.getWaveform(sampleId) ?? null
   }, [])
 
-  const getCacheStats = useCallback(() => ({
-    ...getCacheStatsSnapshot(),
-  }), [])
+  const getCacheStats = useCallback(() => audioRuntimeCache.getStats(), [])
 
   const beginShutdown = useCallback(() => {
     if (isShuttingDown) {
@@ -441,8 +433,7 @@ export function useAudioEngine() {
     }
 
     stopPlayback()
-    pendingDecodePromises.clear()
-    pendingWaveformPromises.clear()
+    audioRuntimeCache.clearPending()
   }, [stopPlayback])
 
   return {

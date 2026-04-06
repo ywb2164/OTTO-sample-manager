@@ -157,7 +157,12 @@ export default function App() {
       const storedGroups = await window.electronAPI.storeGet('groups') as Record<string, any> | null
 
       if (storedSettings) {
-        const { setExpandOnSearch, setFolderClassificationEnabled, setMemoryOptimizationMode } = useSampleStore.getState()
+        const {
+          setExpandOnSearch,
+          setFolderClassificationEnabled,
+          setMemoryOptimizationMode,
+          setEnableChinesePinyinFuzzySearch,
+        } = useSampleStore.getState()
         if (storedSettings.expandOnSearch !== undefined) {
           setExpandOnSearch(storedSettings.expandOnSearch)
         }
@@ -166,6 +171,9 @@ export default function App() {
         }
         if (storedSettings.memoryOptimizationMode !== undefined) {
           setMemoryOptimizationMode(storedSettings.memoryOptimizationMode)
+        }
+        if (storedSettings.enableChinesePinyinFuzzySearch !== undefined) {
+          setEnableChinesePinyinFuzzySearch(storedSettings.enableChinesePinyinFuzzySearch)
         }
       }
 
@@ -189,7 +197,6 @@ export default function App() {
         originalId: s.originalId ?? s.id,
         isCopy: s.isCopy ?? false,
         copyIndex: s.copyIndex ?? 0,
-        waveformData: s.waveformData ? new Float32Array(s.waveformData) : undefined,
         isDecoded: false,
         isFileValid: true,  // 先假设有效，后面验证
       }))
@@ -247,12 +254,10 @@ export default function App() {
 
     const samplesToSave: Record<string, any> = {}
     for (const [id, sample] of samples) {
+      const { waveformData, isDecoded, isFileValid, ...persistedSample } = sample
       samplesToSave[id] = {
-        ...sample,
+        ...persistedSample,
         // 不保存运行时数据
-        waveformData: sample.waveformData ? Array.from(sample.waveformData) : null,
-        isDecoded: false,
-        isFileValid: true,
       }
     }
 
