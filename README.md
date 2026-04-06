@@ -270,43 +270,28 @@ npm run pack
 - 没有新版本：提示当前已是最新版本
 - 检查失败：提示稍后重试
 
-### 更新清单地址
+### 更新来源
 
 主进程默认使用：
 
 ```txt
-https://raw.githubusercontent.com/ywb2164/OTTO-sample-manager/main/docs/update/latest.json
+https://api.github.com/repos/ywb2164/OTTO-sample-manager/releases/latest
 ```
 
-对应仓库内文件：
+读取字段：
 
-```txt
-docs/update/latest.json
-```
+- `tag_name`：最新版本号，支持 `v2.2.2` 或 `2.2.2`
+- `body`：更新说明，弹窗展示前会做基础纯文本整理
+- `assets`：优先匹配 Windows 安装包
+- `html_url`：如果没找到合适安装包，则回退到 release 页面
 
-### 测试更新检查
+Windows 安装包匹配规则：
 
-仓库中已提供测试用清单：
+- 文件名包含 `sample-manager`
+- 文件名包含 `setup`
+- 文件名以 `.exe` 结尾
 
-```txt
-docs/update/latest.json
-```
-
-当前内容指向已存在的 Windows 安装包：
-
-```txt
-https://github.com/ywb2164/OTTO-sample-manager/releases/download/v2.2.1/sample-manager-2.2.1-setup.exe
-```
-
-如果要测试“发现新版本”弹窗，可以把 `latestVersion` 改成比当前应用版本更高的值，例如 `2.2.2`，然后将该 JSON 发布到可访问地址，例如：
-
-- `raw.githubusercontent.com`
-- GitHub Pages
-
-注意：
-
-- 仅修改本地 `docs/update/latest.json` 不会影响线上检查结果，除非你把改动推送到对应分支
-- `downloadUrlWindows` 建议始终使用 GitHub Release 直链，格式例如：
+下载链接优先使用 GitHub Release 资产直链，例如：
 
 ```txt
 https://github.com/ywb2164/OTTO-sample-manager/releases/download/v2.2.1/sample-manager-2.2.1-setup.exe

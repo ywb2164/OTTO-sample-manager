@@ -1,13 +1,26 @@
 import { app, BrowserWindow, dialog, shell } from 'electron'
+import type { MessageBoxOptions } from 'electron'
 
-export interface UpdateManifest {
+interface GitHubReleaseAsset {
+  name?: string
+  browser_download_url?: string
+}
+
+interface GitHubLatestReleaseResponse {
+  tag_name?: string
+  body?: string
+  html_url?: string
+  assets?: GitHubReleaseAsset[]
+}
+
+export interface UpdateInfo {
   latestVersion: string
   downloadUrlWindows: string
-  notes?: string[]
+  notes: string[]
 }
 
 export interface UpdateServiceOptions {
-  manifestUrl: string
+  apiUrl: string
   requestTimeoutMs?: number
   getWindow?: () => BrowserWindow | null
 }
@@ -60,82 +73,139 @@ export function compareSemver(left: string, right: string): number {
   return 0
 }
 
-async function fetchUpdateManifest(
-  manifestUrl: string,
+function cleanupMarkdownText(body: string): string[] {
+  return body
+    .replace(/\r\n/g, '\n')
+    .replace(/^#{1,6}\s*/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/^\s*\d+\.\s+/gm, '')
+    .replace(/[`*_>~]/g, '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+}
+
+function isPreferredWindowsInstallerAsset(asset: GitHubReleaseAsset): boolean {
+  const fileName = asset.name?.toLowerCase() ?? ''
+
+  return (
+    fileName.includes('sample-manager') &&
+    fileName.includes('setup') &&
+    fileName.endsWith('.exe')
+  )
+}
+
+function resolveDownloadUrl(release: GitHubLatestReleaseResponse): string {
+  const preferredAsset = (release.assets ?? []).find(isPreferredWindowsInstallerAsset)
+
+  if (preferredAsset?.browser_download_url) {
+    return preferredAsset.browser_download_url
+  }
+
+  if (typeof release.html_url === 'string' && release.html_url.length > 0) {
+    return release.html_url
+  }
+
+  throw new Error('GitHub release does not contain a valid download url')
+}
+
+async function fetchLatestReleaseInfo(
+  apiUrl: string,
   requestTimeoutMs: number,
-): Promise<UpdateManifest> {
+): Promise<UpdateInfo> {
   const abortController = new AbortController()
   const timeoutId = setTimeout(() => abortController.abort(), requestTimeoutMs)
 
   try {
-    const response = await fetch(manifestUrl, {
+    console.info('[update] GitHub API URL =', apiUrl)
+
+    const response = await fetch(apiUrl, {
       method: 'GET',
       cache: 'no-store',
       signal: abortController.signal,
       headers: {
-        Accept: 'application/json',
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'OTTO-sample-manager',
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
       },
     })
 
     if (!response.ok) {
-      throw new Error(`Update manifest request failed with status ${response.status}`)
+      throw new Error(`GitHub latest release request failed with status ${response.status}`)
     }
 
-    const manifest = (await response.json()) as Partial<UpdateManifest>
+    const release = (await response.json()) as GitHubLatestReleaseResponse
 
-    if (
-      typeof manifest.latestVersion !== 'string' ||
-      typeof manifest.downloadUrlWindows !== 'string'
-    ) {
-      throw new Error('Update manifest is missing required fields')
+    if (typeof release.tag_name !== 'string' || release.tag_name.length === 0) {
+      throw new Error('GitHub latest release response is missing tag_name')
     }
+
+    const normalizedRemoteVersion = normalizeVersion(release.tag_name)
+
+    console.info('[update] GitHub raw tag_name =', release.tag_name)
+    console.info('[update] Normalized remote version =', normalizedRemoteVersion)
 
     return {
-      latestVersion: manifest.latestVersion,
-      downloadUrlWindows: manifest.downloadUrlWindows,
-      notes: Array.isArray(manifest.notes)
-        ? manifest.notes.filter((note): note is string => typeof note === 'string')
-        : [],
+      latestVersion: normalizedRemoteVersion,
+      downloadUrlWindows: resolveDownloadUrl(release),
+      // body 来自 GitHub release markdown，先做基础纯文本整理再展示到弹窗里。
+      notes: typeof release.body === 'string' ? cleanupMarkdownText(release.body) : [],
     }
   } finally {
     clearTimeout(timeoutId)
   }
 }
 
-function buildUpdateMessage(currentVersion: string, manifest: UpdateManifest): string {
-  const notes = manifest.notes && manifest.notes.length > 0 ? manifest.notes : ['暂无更新说明']
+function buildUpdateMessage(currentVersion: string, updateInfo: UpdateInfo): string {
+  const notes = updateInfo.notes.length > 0 ? updateInfo.notes : ['暂无更新说明']
   const noteLines = notes.map((note) => `• ${note}`).join('\n')
 
   return [
     `当前版本：${currentVersion}`,
-    `最新版本：${manifest.latestVersion}`,
+    `最新版本：${updateInfo.latestVersion}`,
     '',
     '更新说明：',
     noteLines,
   ].join('\n')
 }
 
-export class JsonUpdateService implements UpdateProvider {
-  private readonly manifestUrl: string
+export class GitHubReleaseUpdateService implements UpdateProvider {
+  private readonly apiUrl: string
   private readonly requestTimeoutMs: number
   private readonly getWindow: () => BrowserWindow | null
 
   constructor(options: UpdateServiceOptions) {
-    this.manifestUrl = options.manifestUrl
+    this.apiUrl = options.apiUrl
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
     this.getWindow = options.getWindow ?? (() => BrowserWindow.getFocusedWindow() ?? null)
+  }
+
+  private getDialogWindow(): BrowserWindow | undefined {
+    return this.getWindow() ?? BrowserWindow.getFocusedWindow() ?? undefined
+  }
+
+  private showMessageBox(options: MessageBoxOptions) {
+    const dialogWindow = this.getDialogWindow()
+    return dialogWindow
+      ? dialog.showMessageBox(dialogWindow, options)
+      : dialog.showMessageBox(options)
   }
 
   async checkForUpdates(options: CheckForUpdatesOptions = {}): Promise<void> {
     const { silentIfNoUpdate = true, showErrors = false } = options
 
     try {
-      const manifest = await fetchUpdateManifest(this.manifestUrl, this.requestTimeoutMs)
+      const updateInfo = await fetchLatestReleaseInfo(this.apiUrl, this.requestTimeoutMs)
       const currentVersion = app.getVersion()
+      const compareResult = compareSemver(updateInfo.latestVersion, currentVersion)
 
-      if (compareSemver(manifest.latestVersion, currentVersion) <= 0) {
+      console.info('[update] Local app version =', currentVersion)
+      console.info('[update] Version compare result =', compareResult)
+
+      if (compareResult <= 0) {
         if (!silentIfNoUpdate) {
-          await dialog.showMessageBox(this.getWindow(), {
+          await this.showMessageBox({
             type: 'info',
             title: '检查更新',
             message: '当前已是最新版本',
@@ -145,7 +215,7 @@ export class JsonUpdateService implements UpdateProvider {
         return
       }
 
-      const result = await dialog.showMessageBox(this.getWindow(), {
+      const result = await this.showMessageBox({
         type: 'info',
         title: '发现新版本',
         buttons: ['立即下载', '稍后'],
@@ -153,17 +223,17 @@ export class JsonUpdateService implements UpdateProvider {
         cancelId: 1,
         noLink: true,
         message: '检测到新版本可用',
-        detail: buildUpdateMessage(currentVersion, manifest),
+        detail: buildUpdateMessage(currentVersion, updateInfo),
       })
 
       if (result.response === 0) {
-        await shell.openExternal(manifest.downloadUrlWindows)
+        await shell.openExternal(updateInfo.downloadUrlWindows)
       }
     } catch (error) {
       console.warn('[update] check failed', error)
 
       if (showErrors) {
-        await dialog.showMessageBox(this.getWindow(), {
+        await this.showMessageBox({
           type: 'warning',
           title: '检查更新失败',
           message: '暂时无法检查更新，请稍后重试。',

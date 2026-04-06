@@ -3,7 +3,7 @@ import { join } from 'path'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'fs'
 import Store from 'electron-store'
 import { cleanupManagedCopiesSync, createManagedCopySync, getLyricsAssembliesDir } from './copyManager'
-import { JsonUpdateService } from './services/updateService'
+import { GitHubReleaseUpdateService } from './services/updateService'
 
 interface ScannedFolderNode {
   name: string
@@ -37,13 +37,13 @@ const store = new Store({
 })
 
 let mainWindow: BrowserWindow | null = null
-const UPDATE_MANIFEST_URL =
-  'https://raw.githubusercontent.com/ywb2164/OTTO-sample-manager/main/docs/update/latest.json'
+const GITHUB_LATEST_RELEASE_API_URL =
+  'https://api.github.com/repos/ywb2164/OTTO-sample-manager/releases/latest'
 const FALLBACK_DRAG_ICON_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn7L6kAAAAASUVORK5CYII='
 
-const updateService = new JsonUpdateService({
-  manifestUrl: UPDATE_MANIFEST_URL,
+const updateService = new GitHubReleaseUpdateService({
+  apiUrl: GITHUB_LATEST_RELEASE_API_URL,
   getWindow: () => mainWindow,
 })
 

@@ -521,8 +521,8 @@ export default function App() {
 
       const targetGroupId = uuidv4()
       const matchedMap = new Map(plan.matched.map((item) => [item.id, item]))
-      const assembledSamples: Sample[] = copyResult.success
-        .map((copied: { id: string; targetPath: string; fileSize: number }) => {
+      const assembledSamples = copyResult.success
+        .map((copied: { id: string; targetPath: string; fileSize: number }): Sample | null => {
           const matched = matchedMap.get(copied.id)
           if (!matched) return null
 
@@ -546,7 +546,7 @@ export default function App() {
             importedAt: Date.now() + matched.index,
             isDecoded: false,
             isFileValid: true,
-          } satisfies Sample
+          }
         })
         .filter((sample): sample is Sample => sample !== null)
 
@@ -612,7 +612,7 @@ export default function App() {
     e.dataTransfer.effectAllowed = 'move'
   }, [])
 
-  const handleFolderDragOver = useCallback((e: React.DragEvent, folderId: string) => {
+  const handleFolderDragOver = useCallback((e: React.DragEvent, _folderId: string) => {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
   }, [])
