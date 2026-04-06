@@ -108,6 +108,18 @@ export const StatusBar: React.FC<Props> = ({ waveformData, onSeek, onPrimaryActi
     return `${mins}:${secs.padStart(5, '0')}`
   }
 
+  const sampleRateLabel = displaySample && displaySample.sampleRate > 0
+    ? `${displaySample.sampleRate / 1000}kHz`
+    : '--'
+  /*
+  const channelLabel = displaySample && displaySample.channels > 0
+    ? (displaySample.channels === 1 ? '鍗曞０閬? : '绔嬩綋澹?')
+    : '--'
+  */
+  const channelLabel = displaySample && displaySample.channels > 0
+    ? (displaySample.channels === 1 ? 'Mono' : 'Stereo')
+    : '--'
+
   return (
     <div className="flex-shrink-0 border-t border-border bg-bg-secondary">
       {/* 采样信息栏 */}
@@ -117,11 +129,21 @@ export const StatusBar: React.FC<Props> = ({ waveformData, onSeek, onPrimaryActi
             <span className="text-xs text-text-primary font-mono font-medium truncate flex-1">
               {displaySample.fileName}{displaySample.fileExt}
             </span>
+            {/*<span className="text-xs text-text-dim">
+              {sampleRateLabel}
+            </span>
             <span className="text-xs text-text-dim">
-              {displaySample.sampleRate / 1000}kHz
+              {channelLabel}
             </span>
             <span className="text-xs text-text-dim">
               {displaySample.channels === 1 ? '单声道' : '立体声'}
+            </span>
+            */}
+            <span className="text-xs text-text-dim">
+              {sampleRateLabel}
+            </span>
+            <span className="text-xs text-text-dim">
+              {channelLabel}
             </span>
             <span className="text-xs text-text-dim font-mono">
               {(displaySample.fileSize / 1024).toFixed(1)}KB

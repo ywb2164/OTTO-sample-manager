@@ -1,5 +1,7 @@
 import { useRef, useCallback } from 'react'
 import { usePlayerStore } from '@/store/playerStore'
+import { useSampleStore } from '@/store/sampleStore'
+import { audioRuntimeCache } from '@/services/audioRuntimeCache'
 
 const AUDIO_BUFFER_CACHE_LIMIT_BYTES = 200 * 1024 * 1024
 const WAVEFORM_CACHE_LIMIT_BYTES = 50 * 1024 * 1024
@@ -153,12 +155,7 @@ function cacheWaveform(sampleId: string, waveform: Float32Array): void {
 }
 
 function getCacheStatsSnapshot() {
-  return {
-    audioBufferCacheCount: audioBufferCache.getStats().count,
-    audioBufferCacheBytes: audioBufferCache.getStats().bytes,
-    waveformCacheCount: waveformCache.getStats().count,
-    waveformCacheBytes: waveformCache.getStats().bytes,
-  }
+  return audioRuntimeCache.getStats()
 }
 
 export function useAudioEngine() {
@@ -175,7 +172,7 @@ export function useAudioEngine() {
       return null
     }
 
-    const cached = audioBufferCache.get(sampleId)
+    const cached = audioRuntimeCache.getAudioBuffer(sampleId)
     if (cached) {
       return cached
     }
@@ -190,7 +187,13 @@ export function useAudioEngine() {
       if (isShuttingDown) {
         return null
       }
-      cacheAudioBuffer(sampleId, audioBuffer)
+      audioRuntimeCache.setAudioBuffer(sampleId, audioBuffer)
+      useSampleStore.getState().updateSample(sampleId, {
+        duration: audioBuffer.duration,
+        sampleRate: audioBuffer.sampleRate,
+        channels: audioBuffer.numberOfChannels,
+        isDecoded: true,
+      })
       return audioBuffer
     } catch (e) {
       console.error(`解码失败: ${filePath}`, e)
@@ -199,7 +202,7 @@ export function useAudioEngine() {
   }, [])
 
   const extractWaveform = useCallback((sampleId: string, audioBuffer: AudioBuffer): Float32Array => {
-    const cached = waveformCache.get(sampleId)
+    const cached = audioRuntimeCache.getWaveform(sampleId)
     if (cached) {
       return cached
     }
@@ -224,60 +227,69 @@ export function useAudioEngine() {
       waveform[i] = max
     }
 
-    cacheWaveform(sampleId, waveform)
+    audioRuntimeCache.setWaveform(sampleId, waveform)
     return waveform
   }, [])
 
-  const primeDecodedSample = useCallback((sampleId: string, audioBuffer: AudioBuffer): Float32Array => {
+  const ensureDecodedSample = useCallback(async (
+    sampleId: string,
+    filePath: string
+  ): Promise<AudioBuffer | null> => {
     if (isShuttingDown) {
-      return new Float32Array(0)
+      return null
     }
-    cacheAudioBuffer(sampleId, audioBuffer)
-    return extractWaveform(sampleId, audioBuffer)
-  }, [extractWaveform])
 
-  const preDecodeAll = useCallback(async (
-    samples: Array<{ id: string; filePath: string }>,
-    onProgress?: (decoded: number, total: number) => void
-  ) => {
+    const cached = audioRuntimeCache.getAudioBuffer(sampleId)
+    if (cached) {
+      return cached
+    }
+
+    const pending = audioRuntimeCache.getPendingDecode(sampleId)
+    if (pending) {
+      return pending
+    }
+
+    const decodePromise = decodeFile(sampleId, filePath).finally(() => {
+      audioRuntimeCache.clearPendingDecode(sampleId)
+    })
+
+    audioRuntimeCache.setPendingDecode(sampleId, decodePromise)
+    return decodePromise
+  }, [decodeFile])
+
+  const ensureWaveformReady = useCallback(async (
+    sampleId: string,
+    filePath: string
+  ): Promise<Float32Array | null> => {
     if (isShuttingDown) {
-      return
+      return null
     }
 
-    const concurrency = 3
-    let decoded = 0
-
-    for (let i = 0; i < samples.length; i += concurrency) {
-      if (isShuttingDown) {
-        return
-      }
-
-      const batch = samples.slice(i, i + concurrency)
-      await Promise.all(
-        batch.map(async ({ id, filePath }) => {
-          if (isShuttingDown) {
-            return
-          }
-
-          let buffer = audioBufferCache.get(id)
-          if (!buffer) {
-            buffer = await decodeFile(id, filePath)
-          }
-
-          if (buffer && !waveformCache.has(id) && !isShuttingDown) {
-            extractWaveform(id, buffer)
-          }
-
-          if (isShuttingDown) {
-            return
-          }
-
-          decoded++
-          onProgress?.(decoded, samples.length)
-        })
-      )
+    const cached = audioRuntimeCache.getWaveform(sampleId)
+    if (cached) {
+      return cached
     }
-  }, [decodeFile, extractWaveform])
+
+    const pending = audioRuntimeCache.getPendingWaveform(sampleId)
+    if (pending) {
+      return pending
+    }
+
+    const waveformPromise = ensureDecodedSample(sampleId, filePath)
+      .then((audioBuffer) => {
+        if (!audioBuffer || isShuttingDown) {
+          return null
+        }
+
+        return extractWaveform(sampleId, audioBuffer)
+      })
+      .finally(() => {
+        audioRuntimeCache.clearPendingWaveform(sampleId)
+      })
+
+    audioRuntimeCache.setPendingWaveform(sampleId, waveformPromise)
+    return waveformPromise
+  }, [ensureDecodedSample, extractWaveform])
 
   const play = useCallback(async (
     sampleId: string,
@@ -295,13 +307,10 @@ export function useAudioEngine() {
       await ctx.resume()
     }
 
-    let buffer = audioBufferCache.get(sampleId) || null
-    if (!buffer) {
-      buffer = await decodeFile(sampleId, filePath)
-      if (!buffer) return
-    }
+    const buffer = await ensureDecodedSample(sampleId, filePath)
+    if (!buffer) return null
 
-    const waveform = extractWaveform(sampleId, buffer)
+    const waveform = await ensureWaveformReady(sampleId, filePath)
     const source = ctx.createBufferSource()
     source.buffer = buffer
     source.connect(ctx.destination)
@@ -313,7 +322,7 @@ export function useAudioEngine() {
     startTimeRef.current = ctx.currentTime
     startOffsetRef.current = safeOffset
     isPlayingRef.current = true
-    pinnedSampleIds.add(sampleId)
+    audioRuntimeCache.pinSample(sampleId)
 
     setCurrentSampleId(sampleId)
     setCurrentFilePath(filePath)
@@ -323,7 +332,7 @@ export function useAudioEngine() {
     source.onended = () => {
       if (isPlayingRef.current) {
         isPlayingRef.current = false
-        pinnedSampleIds.delete(sampleId)
+        audioRuntimeCache.unpinSample(sampleId)
         setIsPlaying(false)
         setCurrentTime(0)
         cancelAnimationFrame(animFrameRef.current)
@@ -332,8 +341,8 @@ export function useAudioEngine() {
 
     trackPlayhead()
 
-    return waveform
-  }, [decodeFile, extractWaveform])
+    return waveform ?? null
+  }, [ensureDecodedSample, ensureWaveformReady])
 
   const trackPlayhead = useCallback(() => {
     const ctx = getAudioContext()
@@ -355,7 +364,7 @@ export function useAudioEngine() {
 
     const currentSampleId = usePlayerStore.getState().currentSampleId
     if (currentSampleId) {
-      pinnedSampleIds.delete(currentSampleId)
+      audioRuntimeCache.unpinSample(currentSampleId)
     }
 
     if (currentSourceRef.current) {
@@ -406,12 +415,10 @@ export function useAudioEngine() {
   }, [play, stopPlayback, setCurrentTime])
 
   const getWaveform = useCallback((sampleId: string): Float32Array | null => {
-    return waveformCache.get(sampleId) ?? null
+    return audioRuntimeCache.getWaveform(sampleId) ?? null
   }, [])
 
-  const getCacheStats = useCallback(() => ({
-    ...getCacheStatsSnapshot(),
-  }), [])
+  const getCacheStats = useCallback(() => audioRuntimeCache.getStats(), [])
 
   const beginShutdown = useCallback(() => {
     if (isShuttingDown) {
@@ -426,15 +433,16 @@ export function useAudioEngine() {
     }
 
     stopPlayback()
+    audioRuntimeCache.clearPending()
   }, [stopPlayback])
 
   return {
+    ensureDecodedSample,
+    ensureWaveformReady,
     play,
     seekTo,
     togglePause,
-    preDecodeAll,
     getWaveform,
-    primeDecodedSample,
     getCacheStats,
     beginShutdown,
   }
