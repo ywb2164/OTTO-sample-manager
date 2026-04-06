@@ -96,11 +96,10 @@ export default function App() {
   } = useSampleStore()
 
   const { currentSampleId, isPlaying } = usePlayerStore()
-  const { play, togglePause, seekTo, preDecodeAll, getWaveform, primeDecodedSample, getCacheStats, beginShutdown } = useAudioEngine()
+  const { play, togglePause, seekTo, getWaveform, beginShutdown } = useAudioEngine()
   const folderSettings = useSampleStore(state => state.folderSettings)
   const groups = useSampleStore(state => state.groups)
   const isImporting = useSampleStore(state => state.isImporting)
-  const activeGroupId = useSampleStore(state => state.activeGroupId)
 
   const [currentWaveform, setCurrentWaveform] = useState<Float32Array | null>(null)
   const [hasHydratedStore, setHasHydratedStore] = useState(false)
@@ -143,82 +142,6 @@ export default function App() {
     estimateSize: () => 36,  // 每行高度
     overscan: 10,
   })
-  const virtualItems = virtualizer.getVirtualItems()
-
-  const visibleFolderWindowIds = useMemo(() => {
-    if (!folderSettings.memoryOptimizationMode || activeGroupId) {
-      return []
-    }
-
-    const orderedFolderIds = flattenedItems
-      .filter((item): item is SampleFolder => 'path' in item)
-      .map((folder) => folder.id)
-
-    if (orderedFolderIds.length === 0) {
-      return []
-    }
-
-    const firstVisibleIndex = virtualItems[0]?.index ?? 0
-    let anchorFolderId: string | null = null
-
-    for (let index = Math.min(firstVisibleIndex, flattenedItems.length - 1); index >= 0; index--) {
-      const item = flattenedItems[index]
-      if (!item) continue
-
-      if ('path' in item) {
-        anchorFolderId = item.id
-        break
-      }
-
-      if ('filePath' in item) {
-        const folder = useSampleStore.getState().getFolderForSample(item.id)
-        if (folder) {
-          anchorFolderId = folder.id
-          break
-        }
-      }
-    }
-
-    if (!anchorFolderId) {
-      anchorFolderId = orderedFolderIds[0]
-    }
-
-    const startIndex = Math.max(0, orderedFolderIds.indexOf(anchorFolderId))
-    return orderedFolderIds.slice(startIndex, startIndex + 10)
-  }, [activeGroupId, flattenedItems, folderSettings.memoryOptimizationMode, virtualItems])
-
-  const preloadTargets = useMemo(() => {
-    if (!hasHydratedStore) {
-      return []
-    }
-
-    if (folderSettings.memoryOptimizationMode) {
-      if (activeGroupId) {
-        const group = groups.get(activeGroupId)
-        if (!group) return []
-
-        return group.sampleIds
-          .map((sampleId) => samples.get(sampleId))
-          .filter((sample): sample is Sample => Boolean(sample?.isFileValid))
-      }
-
-      const ids = new Set<string>()
-      for (const folderId of visibleFolderWindowIds) {
-        const folderSamples = useSampleStore.getState().getFolderSamples(folderId)
-        folderSamples.forEach((sample) => {
-          if (sample.isFileValid) {
-            ids.add(sample.id)
-          }
-        })
-      }
-
-      return [...ids]
-        .map((sampleId) => samples.get(sampleId))
-        .filter((sample): sample is Sample => Boolean(sample))
-    }
-
-    return [...samples.values()].filter((sample) => sample.isFileValid)
-  }, [activeGroupId, groups, hasHydratedStore, samples, folderSettings.memoryOptimizationMode, visibleFolderWindowIds])
 
   useEffect(() => {
     if (selectAllRef.current) {
@@ -305,36 +228,6 @@ export default function App() {
   }, [addSamples, restoreFolders, setDecodeProgress])
 
   useEffect(() => {
-    if (!hasHydratedStore || preloadTargets.length === 0) {
-      return
-    }
-
-    let cancelled = false
-    const timer = window.setTimeout(() => {
-      preDecodeAll(
-        preloadTargets.map((sample) => ({ id: sample.id, filePath: sample.filePath })),
-        (current, total) => {
-          if (!cancelled) {
-            setDecodeProgress({ current, total })
-          }
-        }
-      ).then(() => {
-        if (!cancelled) {
-          setDecodeProgress(null)
-          if (import.meta.env.DEV) {
-            console.debug('[cache-stats]', getCacheStats())
-          }
-        }
-      })
-    }, 120)
-
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-    }
-  }, [getCacheStats, hasHydratedStore, preDecodeAll, preloadTargets, setDecodeProgress])
-
-  useEffect(() => {
     const handleShutdown = () => {
       beginShutdown()
       setDecodeProgress(null)
@@ -410,7 +303,6 @@ export default function App() {
     if (filePaths.length === 0 || useSampleStore.getState().isImporting) return
     useSampleStore.getState().setIsImporting(true)
 
-    const ctx = new AudioContext()
     const newSamples: Sample[] = []
     const existingFilePaths = new Set(Array.from(useSampleStore.getState().samples.values()).map(sample => sample.filePath))
     const targetGroupId = useSampleStore.getState().activeGroupId
@@ -420,8 +312,8 @@ export default function App() {
         if (existingFilePaths.has(filePath)) continue
 
         try {
-          const arrayBuffer = await window.electronAPI.readFileAsBuffer(filePath)
-          const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
+          const fileInfo = await window.electronAPI.getFileInfo(filePath)
+          if (!fileInfo?.exists) continue
           const { fileName, fileExt } = getFileNameParts(filePath)
 
           const sampleId = uuidv4()
@@ -435,17 +327,16 @@ export default function App() {
             originalId: sampleId,
             isCopy: false,
             copyIndex: 0,
-            duration: audioBuffer.duration,
-            sampleRate: audioBuffer.sampleRate,
-            channels: audioBuffer.numberOfChannels,
-            fileSize: arrayBuffer.byteLength,
+            duration: 0,
+            sampleRate: 0,
+            channels: 0,
+            fileSize: fileInfo.fileSize,
             groupIds: targetGroupId ? [targetGroupId] : [],
             importedAt: Date.now(),
-            isDecoded: true,
+            isDecoded: false,
             isFileValid: true,
           }
 
-          primeDecodedSample(sampleId, audioBuffer)
           newSamples.push(sample)
           existingFilePaths.add(filePath)
         } catch (e) {
@@ -457,10 +348,9 @@ export default function App() {
 
       setDecodeProgress(null)
     } finally {
-      ctx.close()
       useSampleStore.getState().setIsImporting(false)
     }
-  }, [addSamples, primeDecodedSample, setDecodeProgress])
+  }, [addSamples, setDecodeProgress])
 
   const handleImportFiles = useCallback(async () => {
     if (useSampleStore.getState().isImporting) return
@@ -476,7 +366,6 @@ export default function App() {
     if (!scannedRoot) return
 
     useSampleStore.getState().setIsImporting(true)
-    const ctx = new AudioContext()
     const { folders: builtFolders, rootFolderIds } = buildStructuredFolders(scannedRoot)
     const folderMap = new Map(builtFolders.map(folderItem => [folderItem.path, folderItem]))
     const existingFilePaths = new Set(Array.from(useSampleStore.getState().samples.values()).map(sample => sample.filePath))
@@ -493,8 +382,8 @@ export default function App() {
         if (existingFilePaths.has(filePath)) continue
 
         try {
-          const arrayBuffer = await window.electronAPI.readFileAsBuffer(filePath)
-          const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
+          const fileInfo = await window.electronAPI.getFileInfo(filePath)
+          if (!fileInfo?.exists) continue
           const { fileName, fileExt } = getFileNameParts(filePath)
           const sampleId = uuidv4()
           const folderPath = filePath.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
@@ -509,17 +398,16 @@ export default function App() {
             originalId: sampleId,
             isCopy: false,
             copyIndex: 0,
-            duration: audioBuffer.duration,
-            sampleRate: audioBuffer.sampleRate,
-            channels: audioBuffer.numberOfChannels,
-            fileSize: arrayBuffer.byteLength,
+            duration: 0,
+            sampleRate: 0,
+            channels: 0,
+            fileSize: fileInfo.fileSize,
             groupIds: targetGroupId ? [targetGroupId] : [],
             importedAt: Date.now(),
-            isDecoded: true,
+            isDecoded: false,
             isFileValid: true,
           }
 
-          primeDecodedSample(sampleId, audioBuffer)
           newSamples.push(sample)
           if (parentFolder) {
             parentFolder.sampleIds.push(sampleId)
@@ -539,10 +427,9 @@ export default function App() {
 
       setDecodeProgress(null)
     } finally {
-      ctx.close()
       useSampleStore.getState().setIsImporting(false)
     }
-  }, [importStructuredData, primeDecodedSample, setDecodeProgress])
+  }, [importStructuredData, setDecodeProgress])
 
   const handleRemoveAllImported = useCallback(() => {
     const confirmed = window.confirm('确定移除当前导入的全部文件夹和素材吗？\n这不会删除磁盘上的原始文件。')

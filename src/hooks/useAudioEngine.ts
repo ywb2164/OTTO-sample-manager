@@ -1,11 +1,14 @@
 import { useRef, useCallback } from 'react'
 import { usePlayerStore } from '@/store/playerStore'
+import { useSampleStore } from '@/store/sampleStore'
 
 const AUDIO_BUFFER_CACHE_LIMIT_BYTES = 200 * 1024 * 1024
 const WAVEFORM_CACHE_LIMIT_BYTES = 50 * 1024 * 1024
 const isDev = import.meta.env.DEV
 let isShuttingDown = false
 let shutdownSummaryLogged = false
+const pendingDecodePromises = new Map<string, Promise<AudioBuffer | null>>()
+const pendingWaveformPromises = new Map<string, Promise<Float32Array | null>>()
 
 type CacheEntry<V> = {
   value: V
@@ -191,6 +194,12 @@ export function useAudioEngine() {
         return null
       }
       cacheAudioBuffer(sampleId, audioBuffer)
+      useSampleStore.getState().updateSample(sampleId, {
+        duration: audioBuffer.duration,
+        sampleRate: audioBuffer.sampleRate,
+        channels: audioBuffer.numberOfChannels,
+        isDecoded: true,
+      })
       return audioBuffer
     } catch (e) {
       console.error(`解码失败: ${filePath}`, e)
@@ -228,56 +237,65 @@ export function useAudioEngine() {
     return waveform
   }, [])
 
-  const primeDecodedSample = useCallback((sampleId: string, audioBuffer: AudioBuffer): Float32Array => {
+  const ensureDecodedSample = useCallback(async (
+    sampleId: string,
+    filePath: string
+  ): Promise<AudioBuffer | null> => {
     if (isShuttingDown) {
-      return new Float32Array(0)
+      return null
     }
-    cacheAudioBuffer(sampleId, audioBuffer)
-    return extractWaveform(sampleId, audioBuffer)
-  }, [extractWaveform])
 
-  const preDecodeAll = useCallback(async (
-    samples: Array<{ id: string; filePath: string }>,
-    onProgress?: (decoded: number, total: number) => void
-  ) => {
+    const cached = audioBufferCache.get(sampleId)
+    if (cached) {
+      return cached
+    }
+
+    const pending = pendingDecodePromises.get(sampleId)
+    if (pending) {
+      return pending
+    }
+
+    const decodePromise = decodeFile(sampleId, filePath).finally(() => {
+      pendingDecodePromises.delete(sampleId)
+    })
+
+    pendingDecodePromises.set(sampleId, decodePromise)
+    return decodePromise
+  }, [decodeFile])
+
+  const ensureWaveformReady = useCallback(async (
+    sampleId: string,
+    filePath: string
+  ): Promise<Float32Array | null> => {
     if (isShuttingDown) {
-      return
+      return null
     }
 
-    const concurrency = 3
-    let decoded = 0
-
-    for (let i = 0; i < samples.length; i += concurrency) {
-      if (isShuttingDown) {
-        return
-      }
-
-      const batch = samples.slice(i, i + concurrency)
-      await Promise.all(
-        batch.map(async ({ id, filePath }) => {
-          if (isShuttingDown) {
-            return
-          }
-
-          let buffer = audioBufferCache.get(id)
-          if (!buffer) {
-            buffer = await decodeFile(id, filePath)
-          }
-
-          if (buffer && !waveformCache.has(id) && !isShuttingDown) {
-            extractWaveform(id, buffer)
-          }
-
-          if (isShuttingDown) {
-            return
-          }
-
-          decoded++
-          onProgress?.(decoded, samples.length)
-        })
-      )
+    const cached = waveformCache.get(sampleId)
+    if (cached) {
+      return cached
     }
-  }, [decodeFile, extractWaveform])
+
+    const pending = pendingWaveformPromises.get(sampleId)
+    if (pending) {
+      return pending
+    }
+
+    const waveformPromise = ensureDecodedSample(sampleId, filePath)
+      .then((audioBuffer) => {
+        if (!audioBuffer || isShuttingDown) {
+          return null
+        }
+
+        return extractWaveform(sampleId, audioBuffer)
+      })
+      .finally(() => {
+        pendingWaveformPromises.delete(sampleId)
+      })
+
+    pendingWaveformPromises.set(sampleId, waveformPromise)
+    return waveformPromise
+  }, [ensureDecodedSample, extractWaveform])
 
   const play = useCallback(async (
     sampleId: string,
@@ -295,13 +313,10 @@ export function useAudioEngine() {
       await ctx.resume()
     }
 
-    let buffer = audioBufferCache.get(sampleId) || null
-    if (!buffer) {
-      buffer = await decodeFile(sampleId, filePath)
-      if (!buffer) return
-    }
+    const buffer = await ensureDecodedSample(sampleId, filePath)
+    if (!buffer) return null
 
-    const waveform = extractWaveform(sampleId, buffer)
+    const waveform = await ensureWaveformReady(sampleId, filePath)
     const source = ctx.createBufferSource()
     source.buffer = buffer
     source.connect(ctx.destination)
@@ -332,8 +347,8 @@ export function useAudioEngine() {
 
     trackPlayhead()
 
-    return waveform
-  }, [decodeFile, extractWaveform])
+    return waveform ?? null
+  }, [ensureDecodedSample, ensureWaveformReady])
 
   const trackPlayhead = useCallback(() => {
     const ctx = getAudioContext()
@@ -426,15 +441,17 @@ export function useAudioEngine() {
     }
 
     stopPlayback()
+    pendingDecodePromises.clear()
+    pendingWaveformPromises.clear()
   }, [stopPlayback])
 
   return {
+    ensureDecodedSample,
+    ensureWaveformReady,
     play,
     seekTo,
     togglePause,
-    preDecodeAll,
     getWaveform,
-    primeDecodedSample,
     getCacheStats,
     beginShutdown,
   }

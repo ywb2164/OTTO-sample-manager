@@ -79,6 +79,7 @@ export const SampleItem: React.FC<Props> = ({
     .filter(Boolean)
 
   const formatDuration = (s: number) => {
+    if (!Number.isFinite(s) || s <= 0) return '--'
     if (s < 1) return `${(s * 1000).toFixed(0)}ms`
     if (s < 60) return `${s.toFixed(2)}s`
     return `${Math.floor(s / 60)}:${(s % 60).toFixed(0).padStart(2, '0')}`

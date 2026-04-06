@@ -1,6 +1,6 @@
 {
   "name": "sample-manager",
-  "version": "2.0.0",
+  "version": "2.2.0",
   "description": "鬼畜采样管理工具",
   "main": "./out/main/index.js",
   "scripts": {
