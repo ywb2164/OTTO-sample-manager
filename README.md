@@ -249,3 +249,65 @@ npm run pack
 - 自动创建新分组
 - 自动按顺序生成音频
 - 可直接用于人力调音 / 拼接
+
+---
+
+## 更新检查
+
+应用支持两种更新检查方式：
+
+- 启动时自动联网检查更新
+- 在顶部右侧 `⚙` 设置菜单中手动点击 `检查更新`
+
+设置菜单中会显示：
+
+- `当前版本：x.x.x`
+- `检查更新` 按钮
+
+手动检查会有明确反馈：
+
+- 有新版本：弹出更新说明，并可直接跳转下载页
+- 没有新版本：提示当前已是最新版本
+- 检查失败：提示稍后重试
+
+### 更新清单地址
+
+主进程默认使用：
+
+```txt
+https://raw.githubusercontent.com/ywb2164/OTTO-sample-manager/main/docs/update/latest.json
+```
+
+对应仓库内文件：
+
+```txt
+docs/update/latest.json
+```
+
+### 测试更新检查
+
+仓库中已提供测试用清单：
+
+```txt
+docs/update/latest.json
+```
+
+当前内容指向已存在的 Windows 安装包：
+
+```txt
+https://github.com/ywb2164/OTTO-sample-manager/releases/download/v2.2.1/sample-manager-2.2.1-setup.exe
+```
+
+如果要测试“发现新版本”弹窗，可以把 `latestVersion` 改成比当前应用版本更高的值，例如 `2.2.2`，然后将该 JSON 发布到可访问地址，例如：
+
+- `raw.githubusercontent.com`
+- GitHub Pages
+
+注意：
+
+- 仅修改本地 `docs/update/latest.json` 不会影响线上检查结果，除非你把改动推送到对应分支
+- `downloadUrlWindows` 建议始终使用 GitHub Release 直链，格式例如：
+
+```txt
+https://github.com/ywb2164/OTTO-sample-manager/releases/download/v2.2.1/sample-manager-2.2.1-setup.exe
+```

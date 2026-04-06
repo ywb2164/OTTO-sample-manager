@@ -12,10 +12,12 @@ interface Props {
 export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onAssembleLyrics, onRemoveAllImported, isImporting }) => {
   const [alwaysOnTop, setAlwaysOnTop] = useState(true)
   const [opacity, setOpacity] = useState(1.0)
+  const [appVersion, setAppVersion] = useState('')
   const [enableAutoCopy, setEnableAutoCopy] = useState(true)
   const [keepCopies, setKeepCopies] = useState(false)
   const [showImportMenu, setShowImportMenu] = useState(false)
   const [showSettingsMenu, setShowSettingsMenu] = useState(false)
+  const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false)
   const {
     folderSettings,
     setExpandOnSearch,
@@ -30,6 +32,12 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onAss
 
   useEffect(() => {
     window.electronAPI.getOpacity().then(setOpacity)
+  }, [])
+
+  useEffect(() => {
+    window.electronAPI.getAppVersion().then(setAppVersion).catch(() => {
+      setAppVersion('')
+    })
   }, [])
 
   useEffect(() => {
@@ -84,6 +92,20 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onAss
 
   const handleOpenLink = (url: string) => {
     window.electronAPI.openExternalLink(url)
+  }
+
+  const handleCheckForUpdates = async () => {
+    if (isCheckingForUpdates) return
+
+    setIsCheckingForUpdates(true)
+    try {
+      await window.electronAPI.checkForUpdates({
+        silentIfNoUpdate: false,
+        showErrors: true,
+      })
+    } finally {
+      setIsCheckingForUpdates(false)
+    }
   }
 
   const actionButtonClassName =
@@ -214,10 +236,10 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onAss
                   checked={folderSettings.enableChinesePinyinFuzzySearch}
                   onChange={(e) => setEnableChinesePinyinFuzzySearch(e.target.checked)}
                 />
-                <span>Chinese fuzzy search</span>
+                <span>中文模糊搜索</span>
               </label>
               <div className="text-[11px] text-text-dim mt-1 leading-4">
-                Only expands Chinese queries to same-pinyin Chinese file names. Pure pinyin file names stay out.
+                仅将中文查询扩展为同音的中文素材名（纯拼音的文件除外）
               </div>
               <div className="border-t border-border my-2"></div>
               <label className="flex items-center gap-2 text-xs text-text-primary cursor-pointer">
@@ -270,6 +292,26 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onAss
                 <span className="text-xs text-text-dim w-8 text-right whitespace-nowrap">
                   {opacity.toFixed(2)}
                 </span>
+              </div>
+              <div className="border-t border-border my-2"></div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2 text-xs text-text-primary">
+                  <span>当前版本：{appVersion || '读取中...'}</span>
+                  <button
+                    className={`inline-flex items-center justify-center rounded px-2.5 py-1.5 text-xs transition-colors ${
+                      isCheckingForUpdates
+                        ? 'bg-accent-primary/60 text-white cursor-wait'
+                        : 'bg-accent-primary/85 hover:bg-accent-primary text-white'
+                    }`}
+                    onClick={handleCheckForUpdates}
+                    disabled={isCheckingForUpdates}
+                  >
+                    {isCheckingForUpdates ? '检查中...' : '检查更新'}
+                  </button>
+                </div>
+                <div className="text-[11px] text-text-dim leading-4">
+                  手动检查会提示新版本、已是最新版本，或检查失败。
+                </div>
               </div>
               <div className="border-t border-border my-2"></div>
               <div className="space-y-1">
