@@ -102,6 +102,8 @@ export default function App() {
   const folderSettings = useSampleStore(state => state.folderSettings)
   const groups = useSampleStore(state => state.groups)
   const isImporting = useSampleStore(state => state.isImporting)
+  const searchQuery = useSampleStore(state => state.searchQuery)
+  const activeGroupId = useSampleStore(state => state.activeGroupId)
 
   const [currentWaveform, setCurrentWaveform] = useState<Float32Array | null>(null)
   const [hasHydratedStore, setHasHydratedStore] = useState(false)
@@ -138,12 +140,27 @@ export default function App() {
     return state.getFlattenedItems();
   })
 
+  const listResetKey = useMemo(
+    () => `${searchQuery}\u0000${activeGroupId ?? 'all'}\u0000${flattenedItems.length}`,
+    [activeGroupId, flattenedItems.length, searchQuery],
+  )
+
   const virtualizer = useVirtualizer({
     count: flattenedItems.length,
     getScrollElement: () => listRef.current,
+    getItemKey: (index) => {
+      const item = flattenedItems[index]
+      if (!item) return `missing-${index}`
+      return 'filePath' in item ? `sample-${item.id}` : `folder-${item.id}`
+    },
     estimateSize: () => 44,
     overscan: 10,
   })
+
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: 0 })
+    virtualizer.measure()
+  }, [listResetKey])
 
   useEffect(() => {
     if (selectAllRef.current) {
@@ -831,6 +848,7 @@ export default function App() {
           </div>
         ) : (
           <div
+            key={listResetKey}
             style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}
           >
             {virtualizer.getVirtualItems().map(virtualRow => {
