@@ -170,6 +170,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   const copySettings = (store.get('copySettings') as { enableAutoCopy?: boolean; keepCopies?: boolean } | undefined) ?? {}
+  console.debug('[cleanup] copySettings=', copySettings)
   if (copySettings.keepCopies) {
     console.debug('[cleanup] preserveCopies=true, skip drag-copies cleanup')
     return
@@ -340,6 +341,8 @@ ipcMain.on('drag-out-files', (event, filePaths: string[]) => {
     if (import.meta.env.DEV) {
       console.debug('[drag-out][main] incoming', filePaths)
       console.debug('[drag-out][main] valid', validPaths)
+      console.debug('[drag-out][main] requestedCount=', filePaths.length)
+      console.debug('[drag-out][main] draggedCount=', validPaths.length > 0 ? 1 : 0)
     }
     if (validPaths.length === 0) return
 
@@ -371,6 +374,8 @@ ipcMain.on('drag-out-files', (event, filePaths: string[]) => {
       console.debug('[drag policy] autoCopyEnabled=', enableAutoCopy)
       console.debug('[drag policy] useOriginal=', useOriginal)
       console.debug('[drag policy] chosenPath=', targetPath)
+      console.debug('[drag policy] requestedCount=', filePaths.length)
+      console.debug('[drag policy] draggedCount=1')
     }
 
     const dragIcon = resolveDragIcon()
@@ -397,11 +402,11 @@ ipcMain.handle('store-get', (_, key: string) => {
   return store.get(key)
 })
 
-ipcMain.on('store-set', (_, key: string, value: unknown) => {
+ipcMain.handle('store-set', (_, key: string, value: unknown) => {
   store.set(key as any, value)
 })
 
-ipcMain.on('store-delete', (_, key: string) => {
+ipcMain.handle('store-delete', (_, key: string) => {
   // @ts-ignore - store.delete is technically expecting specific keys but we use dynamic ones
   store.delete(key as any)
 })
@@ -431,16 +436,20 @@ ipcMain.handle('lyrics-create-files', async (_, payload: {
     `${sanitizePathSegment(payload.targetGroupName)}_${Date.now()}`
   )
 
-  mkdirSync(baseDir, { recursive: true })
-
   const success: Array<{ id: string; sourcePath: string; targetPath: string; fileSize: number }> = []
   const failed: Array<{ id: string; sourcePath: string; reason: string }> = []
+  let hasCreatedTargetDir = false
 
   for (const item of payload.items) {
     try {
       if (!existsSync(item.sourcePath)) {
         failed.push({ id: item.id, sourcePath: item.sourcePath, reason: 'source-missing' })
         continue
+      }
+
+      if (!hasCreatedTargetDir) {
+        mkdirSync(baseDir, { recursive: true })
+        hasCreatedTargetDir = true
       }
 
       const targetPath = join(baseDir, sanitizePathSegment(item.fileName))
@@ -457,5 +466,5 @@ ipcMain.handle('lyrics-create-files', async (_, payload: {
     }
   }
 
-  return { success, failed, targetDir: baseDir }
+  return { success, failed, targetDir: hasCreatedTargetDir ? baseDir : null }
 })

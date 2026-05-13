@@ -3,6 +3,7 @@
 import React, { Suspense, useEffect, useCallback, useMemo, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { v4 as uuidv4 } from 'uuid'
+import { FileText, Loader2, Music2, X } from 'lucide-react'
 
 import { TitleBar } from '@/components/TitleBar'
 import { SearchBar } from '@/components/SearchBar'
@@ -10,6 +11,7 @@ import { GroupBar } from '@/components/GroupBar'
 import { SampleItem } from '@/components/SampleList/SampleItem'
 import { FolderItem } from '@/components/FolderItem'
 import { StatusBar } from '@/components/StatusBar/StatusBar'
+import { ContextMenu } from '@/components/ContextMenu'
 
 import { useSampleStore } from '@/store/sampleStore'
 import { usePlayerStore } from '@/store/playerStore'
@@ -96,7 +98,7 @@ export default function App() {
   } = useSampleStore()
 
   const { currentSampleId, isPlaying } = usePlayerStore()
-  const { play, togglePause, seekTo, getWaveform, beginShutdown } = useAudioEngine()
+  const { play, stopPlayback, togglePause, seekTo, getWaveform, beginShutdown } = useAudioEngine()
   const folderSettings = useSampleStore(state => state.folderSettings)
   const groups = useSampleStore(state => state.groups)
   const isImporting = useSampleStore(state => state.isImporting)
@@ -139,7 +141,7 @@ export default function App() {
   const virtualizer = useVirtualizer({
     count: flattenedItems.length,
     getScrollElement: () => listRef.current,
-    estimateSize: () => 36,  // 每行高度
+    estimateSize: () => 44,
     overscan: 10,
   })
 
@@ -261,7 +263,9 @@ export default function App() {
       }
     }
 
-    window.electronAPI.storeSet('samples', samplesToSave)
+    window.electronAPI.storeSet('samples', samplesToSave).catch((error) => {
+      console.error('保存 samples 失败', error)
+    })
   }, [hasHydratedStore, samples])
 
   useEffect(() => {
@@ -278,7 +282,9 @@ export default function App() {
       folderState.folders[id] = folder
     }
 
-    window.electronAPI.storeSet('folderState', folderState)
+    window.electronAPI.storeSet('folderState', folderState).catch((error) => {
+      console.error('保存 folderState 失败', error)
+    })
   }, [folders, folderOrder, hasHydratedStore])
 
   useEffect(() => {
@@ -290,7 +296,9 @@ export default function App() {
     for (const [id, group] of groups) {
       groupsToSave[id] = group
     }
-    window.electronAPI.storeSet('groups', groupsToSave)
+    window.electronAPI.storeSet('groups', groupsToSave).catch((error) => {
+      console.error('保存 groups 失败', error)
+    })
   }, [groups, hasHydratedStore])
 
   useEffect(() => {
@@ -298,8 +306,19 @@ export default function App() {
       return
     }
 
-    window.electronAPI.storeSet('folderSettings', folderSettings)
+    window.electronAPI.storeSet('folderSettings', folderSettings).catch((error) => {
+      console.error('保存 folderSettings 失败', error)
+    })
   }, [folderSettings, hasHydratedStore])
+
+  useEffect(() => {
+    if (!currentSampleId || samples.has(currentSampleId)) {
+      return
+    }
+
+    stopPlayback({ resetTime: true, clearSample: true })
+    setCurrentWaveform(null)
+  }, [currentSampleId, samples, stopPlayback])
 
   // ------------------------------
   // 导入文件
@@ -441,6 +460,7 @@ export default function App() {
     if (!confirmed) return
 
     removeAllImported()
+    stopPlayback({ resetTime: true, clearSample: true })
     setCurrentWaveform(null)
 
     const playerStore = usePlayerStore.getState()
@@ -449,8 +469,10 @@ export default function App() {
     playerStore.setIsPlaying(false)
     playerStore.setCurrentTime(0)
     playerStore.setDuration(0)
-    window.electronAPI.storeDelete('folderState')
-  }, [removeAllImported])
+    window.electronAPI.storeDelete('folderState').catch((error) => {
+      console.error('删除 folderState 失败', error)
+    })
+  }, [removeAllImported, stopPlayback])
 
   const resetLyricsAssemblerState = useCallback(() => {
     setLyricsFilePath('')
@@ -490,6 +512,12 @@ export default function App() {
       return
     }
 
+    const parsedLyricCharCount = lyricsTokens.filter((token): token is Extract<LyricToken, { type: 'char' }> => token.type === 'char').length
+    if (parsedLyricCharCount === 0) {
+      window.alert('歌词文件里没有可用于活字印刷的汉字。')
+      return
+    }
+
     const sourceGroup = groups.get(lyricsSourceGroupId)
     if (!sourceGroup) {
       return
@@ -510,6 +538,12 @@ export default function App() {
     try {
       const sourceIndex = buildLyricsSourceSampleIndex(sourceSamples)
       const plan = planLyricsAssembly(lyricsTokens, sourceIndex)
+
+      if (plan.matched.length === 0) {
+        window.alert(`没有匹配到可生成的素材，缺失 ${plan.missing.length} 个字。请检查源声库分组或素材命名。`)
+        return
+      }
+
       const copyResult = await window.electronAPI.createLyricsFiles({
         targetGroupName: lyricsTargetGroupName.trim(),
         items: plan.matched.map((item) => ({
@@ -550,6 +584,11 @@ export default function App() {
         })
         .filter((sample): sample is Sample => sample !== null)
 
+      if (assembledSamples.length === 0) {
+        window.alert(`没有成功复制任何素材，复制失败 ${copyResult.failed.length} 个。请检查源文件是否仍然存在。`)
+        return
+      }
+
       addGroup({
         id: targetGroupId,
         name: lyricsTargetGroupName.trim(),
@@ -564,12 +603,24 @@ export default function App() {
         missing: plan.missing,
         failedCopies: copyResult.failed.length,
       })
+
+      const resultLines = [
+        `活字印刷生成完成：${assembledSamples.length} 个素材`,
+        `缺失：${plan.missing.length} 个`,
+        `复制失败：${copyResult.failed.length} 个`,
+      ]
+      if (copyResult.targetDir) {
+        resultLines.push(`输出目录：${copyResult.targetDir}`)
+      }
+      window.alert(resultLines.join('\n'))
+      setShowLyricsAssembler(false)
+      resetLyricsAssemblerState()
     } catch (error) {
       window.alert('活字印刷生成失败，请检查歌词文件和源声库分组。')
     } finally {
       setIsAssemblingLyrics(false)
     }
-  }, [addGroup, addSamples, groups, isAssemblingLyrics, lyricsFilePath, lyricsSourceGroupId, lyricsTargetGroupName, lyricsTokens, samples, setActiveGroupId])
+  }, [addGroup, addSamples, groups, isAssemblingLyrics, lyricsFilePath, lyricsSourceGroupId, lyricsTargetGroupName, lyricsTokens, resetLyricsAssemblerState, samples, setActiveGroupId])
 
   // 拖文件到窗口导入
   const handleWindowDrop = useCallback((e: React.DragEvent) => {
@@ -601,9 +652,6 @@ export default function App() {
     const confirmed = window.confirm(`确定删除文件夹 "${folder.name}" 及其中的 ${folderSamples.length} 个样本吗？这不会删除原文件`)
     if (confirmed) {
       removeFolder(folderId)
-      // 同时删除文件夹内的所有样本
-      const { removeSamples } = useSampleStore.getState()
-      removeSamples(folderSamples.map(sample => sample.id))
     }
   }, [folders, removeFolder])
 
@@ -635,13 +683,28 @@ export default function App() {
   // ------------------------------
   const handlePlay = useCallback(async (sample: Sample) => {
     if (!sample.isFileValid) return
+
+    const playerState = usePlayerStore.getState()
+    if (playerState.currentSampleId === sample.id && playerState.currentFilePath) {
+      await togglePause(sample.id, playerState.currentFilePath)
+      const cachedWaveform = getWaveform(sample.id)
+      if (cachedWaveform) {
+        setCurrentWaveform(cachedWaveform)
+      }
+      return
+    }
+
     const waveform = await play(sample.id, sample.filePath, 0)
+    if (usePlayerStore.getState().currentSampleId !== sample.id) {
+      return
+    }
+
     if (waveform) setCurrentWaveform(waveform)
     else {
       const cached = getWaveform(sample.id)
       if (cached) setCurrentWaveform(cached)
     }
-  }, [play, getWaveform])
+  }, [getWaveform, play, togglePause])
 
   const handlePrimaryPlaybackAction = useCallback(async () => {
     const targetSample = (() => {
@@ -659,10 +722,6 @@ export default function App() {
     if (playerState.currentSampleId === targetSample.id && playerState.currentFilePath) {
       await togglePause(targetSample.id, playerState.currentFilePath)
 
-      if (playerState.isPlaying) {
-        return
-      }
-
       const cachedWaveform = getWaveform(targetSample.id)
       if (cachedWaveform) {
         setCurrentWaveform(cachedWaveform)
@@ -671,6 +730,10 @@ export default function App() {
     }
 
     const waveform = await play(targetSample.id, targetSample.filePath, 0)
+    if (usePlayerStore.getState().currentSampleId !== targetSample.id) {
+      return
+    }
+
     if (waveform) {
       setCurrentWaveform(waveform)
       return
@@ -709,7 +772,7 @@ export default function App() {
   // ------------------------------
   return (
     <div
-      className="relative flex flex-col h-screen bg-bg-primary text-text-primary overflow-hidden"
+      className="relative flex h-screen flex-col overflow-hidden bg-zinc-950 text-zinc-100 antialiased"
       onDragOver={e => e.preventDefault()}
       onDrop={handleWindowDrop}
     >
@@ -728,22 +791,15 @@ export default function App() {
       {/* 分组筛选栏 */}
       <GroupBar />
 
-      {/* 多选操作栏（右键菜单触发显示） */}
-      {selectedIds.size > 0 && (
-        <Suspense fallback={null}>
-          <SelectionBar />
-        </Suspense>
-      )}
-
       {samples.size > 0 && (
-        <div className="px-3 py-1.5 border-b border-border bg-bg-secondary/60">
-          <label className="flex items-center gap-2 text-xs text-text-primary cursor-pointer w-fit">
+        <div className="border-b border-white/5 bg-zinc-950 px-3 py-2">
+          <label className="flex w-fit cursor-pointer items-center gap-2 rounded-md border border-white/5 bg-transparent px-2.5 py-1.5 text-xs text-zinc-500 transition-colors hover:bg-white/[0.035] hover:text-zinc-200">
             <input
               ref={selectAllRef}
               type="checkbox"
               checked={isAllSelected}
               onChange={handleToggleSelectAll}
-              className="w-4 h-4 accent-blue-500"
+              className="h-3.5 w-3.5"
             />
             <span>全选</span>
           </label>
@@ -751,16 +807,23 @@ export default function App() {
       )}
 
       {/* 采样列表（虚拟滚动） */}
-      <div className="flex-1 relative overflow-hidden">
+      <div className="relative flex-1 overflow-hidden bg-zinc-950">
+      {selectedIds.size > 0 && (
+        <Suspense fallback={null}>
+          <SelectionBar />
+        </Suspense>
+      )}
       <div
         ref={listRef}
         className="h-full overflow-y-auto overflow-x-hidden"
         style={{ contain: 'strict' }}
       >
         {flattenedItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full gap-3 text-text-dim">
-            <div className="text-4xl">🎵</div>
-            <div className="text-sm">
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-zinc-600">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-white/5 bg-white/[0.025] text-zinc-500">
+              <Music2 size={24} />
+            </div>
+            <div className="text-sm text-zinc-500">
               {samples.size === 0
                 ? '拖入音频文件或点击导入按钮'
                 : '没有匹配的采样'}
@@ -826,9 +889,9 @@ export default function App() {
         )}
       </div>
       {isImporting && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-bg-primary/70 backdrop-blur-[1px] pointer-events-auto">
-          <div className="flex items-center gap-3 px-4 py-3 rounded-lg border border-border bg-bg-secondary/95 shadow-lg">
-            <div className="w-5 h-5 border-2 border-accent-primary/30 border-t-accent-primary rounded-full animate-spin" />
+        <div className="pointer-events-auto absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/70 backdrop-blur-sm">
+          <div className="flex items-center gap-3 rounded-lg border border-white/5 bg-zinc-950/95 px-4 py-3 shadow-lg shadow-black/30 backdrop-blur-xl">
+            <Loader2 size={20} className="animate-spin text-blue-400" />
             <div className="flex flex-col">
               <span className="text-sm text-text-primary">入飞门中...</span>
               <span className="text-xs text-text-dim">飞马正在8bc, 别急</span>
@@ -839,34 +902,36 @@ export default function App() {
       </div>
 
       {showLyricsAssembler && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/45 px-4">
-          <div className="w-full max-w-md rounded-xl border border-border bg-bg-secondary shadow-2xl">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md overflow-hidden rounded-xl border border-white/5 bg-zinc-950/95 shadow-lg shadow-black/40 backdrop-blur-xl">
+            <div className="flex items-start justify-between border-b border-border-subtle px-4 py-3">
               <div>
-                <div className="text-sm font-medium text-text-primary">活字印刷生成</div>
-                <div className="text-[11px] text-text-dim mt-1">逐字转无声调拼音，并按顺序复制单字素材到新分组</div>
+                <div className="text-sm font-semibold text-text-primary">活字印刷生成</div>
+                <div className="mt-1 text-[11px] text-text-dim">逐字转无声调拼音，并按顺序复制单字素材到新分组</div>
               </div>
               <button
-                className="text-text-dim hover:text-text-primary text-sm"
+                className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary disabled:opacity-50"
                 onClick={handleCloseLyricsAssembler}
                 disabled={isAssemblingLyrics}
+                title="关闭"
               >
-                ✕
+                <X size={15} />
               </button>
             </div>
 
             <div className="p-4 space-y-4">
               <div className="space-y-2">
-                <div className="text-xs text-text-primary">文本 txt</div>
+                <div className="text-xs font-medium text-text-secondary">文本 txt</div>
                 <div className="flex items-center gap-2">
                   <button
-                    className="px-3 py-1.5 rounded bg-accent-primary hover:bg-accent-light text-white text-xs disabled:opacity-60"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md bg-accent-primary px-3 text-xs font-medium text-white transition-colors hover:bg-accent-light disabled:cursor-not-allowed disabled:opacity-60"
                     onClick={handlePickLyricsFile}
                     disabled={isAssemblingLyrics}
                   >
+                    <FileText size={14} />
                     选择 txt
                   </button>
-                  <div className="min-w-0 flex-1 text-[11px] text-text-dim truncate">
+                  <div className="min-w-0 flex-1 truncate text-[11px] text-text-dim">
                     {lyricsFilePath || '未选择歌词文件'}
                   </div>
                 </div>
@@ -878,11 +943,11 @@ export default function App() {
               </div>
 
               <div className="space-y-2">
-                <div className="text-xs text-text-primary">源声库分组</div>
+                <div className="text-xs font-medium text-text-secondary">源声库分组</div>
                 <select
                   value={lyricsSourceGroupId}
                   onChange={(e) => setLyricsSourceGroupId(e.target.value)}
-                  className="w-full rounded bg-bg-tertiary border border-border px-3 py-2 text-sm text-text-primary outline-none"
+                  className="h-9 w-full rounded-md border border-border-subtle bg-bg-elevated px-3 text-sm text-text-primary outline-none transition-colors focus:border-accent-primary"
                   disabled={isAssemblingLyrics}
                 >
                   <option value="">请选择已有分组</option>
@@ -895,26 +960,26 @@ export default function App() {
               </div>
 
               <div className="space-y-2">
-                <div className="text-xs text-text-primary">目标分组名</div>
+                <div className="text-xs font-medium text-text-secondary">目标分组名</div>
                 <input
                   value={lyricsTargetGroupName}
                   onChange={(e) => setLyricsTargetGroupName(e.target.value)}
                   placeholder="默认取 txt 文件名"
-                  className="w-full rounded bg-bg-tertiary border border-border px-3 py-2 text-sm text-text-primary outline-none"
+                  className="h-9 w-full rounded-md border border-border-subtle bg-bg-elevated px-3 text-sm text-text-primary outline-none transition-colors placeholder:text-text-dim focus:border-accent-primary"
                   disabled={isAssemblingLyrics}
                 />
               </div>
 
               {lyricsResult && (
-                <div className="rounded-lg border border-border bg-bg-tertiary/70 p-3 space-y-2">
+                <div className="space-y-2 rounded-lg border border-border-subtle bg-bg-surface/80 p-3">
                   <div className="text-xs text-text-primary">
                     已生成 {lyricsResult.successCount} 个素材，缺失 {lyricsResult.missing.length} 个，复制失败 {lyricsResult.failedCopies} 个
                   </div>
                   {lyricsResult.missing.length > 0 && (
-                    <div className="max-h-28 overflow-y-auto text-[11px] text-text-dim space-y-1">
+                    <div className="max-h-28 space-y-1 overflow-y-auto text-[11px] text-text-dim">
                       {lyricsResult.missing.slice(0, 12).map((item) => (
                         <div key={`${item.index}-${item.char}-${item.pinyin}`}>
-                          {String(item.index).padStart(3, '0')} · {item.char} · {item.pinyin || '无拼音'}
+                          {String(item.index).padStart(3, '0')} - {item.char} - {item.pinyin || '无拼音'}
                         </div>
                       ))}
                       {lyricsResult.missing.length > 12 && (
@@ -926,20 +991,21 @@ export default function App() {
               )}
             </div>
 
-            <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-border">
+            <div className="flex items-center justify-end gap-2 border-t border-border-subtle px-4 py-3">
               <button
-                className="px-3 py-1.5 rounded bg-bg-tertiary hover:bg-bg-hover text-text-primary text-xs disabled:opacity-60"
+                className="h-8 rounded-md border border-border-subtle bg-bg-surface px-3 text-xs text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary disabled:opacity-60"
                 onClick={handleCloseLyricsAssembler}
                 disabled={isAssemblingLyrics}
               >
                 取消
               </button>
               <button
-                className="px-3 py-1.5 rounded bg-accent-primary hover:bg-accent-light text-white text-xs disabled:opacity-60"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-accent-primary px-3 text-xs font-medium text-white transition-colors hover:bg-accent-light disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={handleAssembleLyrics}
                 disabled={isAssemblingLyrics || !lyricsFilePath || !lyricsSourceGroupId || !lyricsTargetGroupName.trim()}
               >
-                {isAssemblingLyrics ? '生成中...' : '开始生成'}
+                {isAssemblingLyrics && <Loader2 size={14} className="animate-spin" />}
+                <span>{isAssemblingLyrics ? '生成中...' : '开始生成'}</span>
               </button>
             </div>
           </div>
@@ -954,6 +1020,7 @@ export default function App() {
         canControl={canControlPrimarySample}
         isPrimaryPlaying={isPrimarySamplePlaying}
       />
+      <ContextMenu />
     </div>
   )
 }

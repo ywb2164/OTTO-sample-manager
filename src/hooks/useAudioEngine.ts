@@ -164,6 +164,7 @@ export function useAudioEngine() {
   const startOffsetRef = useRef<number>(0)
   const animFrameRef = useRef<number>(0)
   const isPlayingRef = useRef<boolean>(false)
+  const playbackRequestIdRef = useRef<number>(0)
 
   const { setCurrentTime, setIsPlaying, setDuration, setCurrentSampleId, setCurrentFilePath } = usePlayerStore()
 
@@ -291,6 +292,50 @@ export function useAudioEngine() {
     return waveformPromise
   }, [ensureDecodedSample, extractWaveform])
 
+  const trackPlayhead = useCallback(() => {
+    const ctx = getAudioContext()
+
+    const tick = () => {
+      if (!isPlayingRef.current || isShuttingDown) return
+      const elapsed = ctx.currentTime - startTimeRef.current
+      const currentTime = startOffsetRef.current + elapsed
+      setCurrentTime(currentTime)
+      animFrameRef.current = requestAnimationFrame(tick)
+    }
+
+    animFrameRef.current = requestAnimationFrame(tick)
+  }, [setCurrentTime])
+
+  const stopPlayback = useCallback((options?: { resetTime?: boolean; clearSample?: boolean }) => {
+    playbackRequestIdRef.current += 1
+    cancelAnimationFrame(animFrameRef.current)
+    isPlayingRef.current = false
+
+    const currentSampleId = usePlayerStore.getState().currentSampleId
+    if (currentSampleId) {
+      audioRuntimeCache.unpinSample(currentSampleId)
+    }
+
+    if (currentSourceRef.current) {
+      try {
+        currentSourceRef.current.stop()
+        currentSourceRef.current.disconnect()
+      } catch {
+        // ignore
+      }
+      currentSourceRef.current = null
+    }
+    setIsPlaying(false)
+    if (options?.resetTime) {
+      setCurrentTime(0)
+    }
+    if (options?.clearSample) {
+      setCurrentSampleId(null)
+      setCurrentFilePath(null)
+      setDuration(0)
+    }
+  }, [setCurrentFilePath, setCurrentSampleId, setCurrentTime, setDuration, setIsPlaying])
+
   const play = useCallback(async (
     sampleId: string,
     filePath: string,
@@ -301,16 +346,30 @@ export function useAudioEngine() {
     }
 
     stopPlayback()
+    const requestId = playbackRequestIdRef.current
 
     const ctx = getAudioContext()
     if (ctx.state === 'suspended') {
       await ctx.resume()
     }
 
+    if (playbackRequestIdRef.current !== requestId || isShuttingDown) {
+      return null
+    }
+
     const buffer = await ensureDecodedSample(sampleId, filePath)
-    if (!buffer) return null
+    if (!buffer || playbackRequestIdRef.current !== requestId || isShuttingDown) {
+      if (playbackRequestIdRef.current === requestId) {
+        stopPlayback({ resetTime: true, clearSample: true })
+      }
+      return null
+    }
 
     const waveform = await ensureWaveformReady(sampleId, filePath)
+    if (playbackRequestIdRef.current !== requestId || isShuttingDown) {
+      return null
+    }
+
     const source = ctx.createBufferSource()
     source.buffer = buffer
     source.connect(ctx.destination)
@@ -330,54 +389,22 @@ export function useAudioEngine() {
     setIsPlaying(true)
 
     source.onended = () => {
-      if (isPlayingRef.current) {
-        isPlayingRef.current = false
-        audioRuntimeCache.unpinSample(sampleId)
-        setIsPlaying(false)
-        setCurrentTime(0)
-        cancelAnimationFrame(animFrameRef.current)
+      if (currentSourceRef.current !== source || !isPlayingRef.current) {
+        return
       }
+
+      isPlayingRef.current = false
+      currentSourceRef.current = null
+      audioRuntimeCache.unpinSample(sampleId)
+      setIsPlaying(false)
+      setCurrentTime(0)
+      cancelAnimationFrame(animFrameRef.current)
     }
 
     trackPlayhead()
 
     return waveform ?? null
-  }, [ensureDecodedSample, ensureWaveformReady])
-
-  const trackPlayhead = useCallback(() => {
-    const ctx = getAudioContext()
-
-    const tick = () => {
-      if (!isPlayingRef.current || isShuttingDown) return
-      const elapsed = ctx.currentTime - startTimeRef.current
-      const currentTime = startOffsetRef.current + elapsed
-      setCurrentTime(currentTime)
-      animFrameRef.current = requestAnimationFrame(tick)
-    }
-
-    animFrameRef.current = requestAnimationFrame(tick)
-  }, [setCurrentTime])
-
-  const stopPlayback = useCallback(() => {
-    cancelAnimationFrame(animFrameRef.current)
-    isPlayingRef.current = false
-
-    const currentSampleId = usePlayerStore.getState().currentSampleId
-    if (currentSampleId) {
-      audioRuntimeCache.unpinSample(currentSampleId)
-    }
-
-    if (currentSourceRef.current) {
-      try {
-        currentSourceRef.current.stop()
-        currentSourceRef.current.disconnect()
-      } catch {
-        // ignore
-      }
-      currentSourceRef.current = null
-    }
-    setIsPlaying(false)
-  }, [setIsPlaying])
+  }, [ensureDecodedSample, ensureWaveformReady, setCurrentFilePath, setCurrentSampleId, setCurrentTime, setDuration, setIsPlaying, stopPlayback, trackPlayhead])
 
   const seekTo = useCallback((
     sampleId: string,
@@ -441,6 +468,7 @@ export function useAudioEngine() {
     ensureWaveformReady,
     play,
     seekTo,
+    stopPlayback,
     togglePause,
     getWaveform,
     getCacheStats,

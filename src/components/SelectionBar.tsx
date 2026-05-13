@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { ChevronDown, Layers3, Trash2, X } from 'lucide-react'
 import { useSampleStore } from '@/store/sampleStore'
 
 export const SelectionBar: React.FC = () => {
@@ -41,50 +42,53 @@ export const SelectionBar: React.FC = () => {
   if (selectedIds.size === 0) return null
 
   return (
-    <div className="p-2 bg-blue-900 text-white flex justify-between items-center text-sm">
-      <div className="flex items-center gap-4">
-        <span>已选中 {selectedIds.size} 个样本</span>
+    <div className="pointer-events-none absolute left-2 right-2 top-2 z-20 flex justify-center">
+      <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-1.5 rounded-lg border border-white/5 bg-zinc-950/95 px-1.5 py-1.5 text-xs text-zinc-100 shadow-lg shadow-black/30 backdrop-blur-xl">
+        <span className="shrink-0 px-1.5 text-zinc-500">已选 {selectedIds.size}</span>
         <button
           onClick={handleClear}
-          className="px-3 py-1 bg-blue-700 rounded hover:bg-blue-600 transition-colors"
+          className="inline-flex h-7 items-center gap-1 rounded-md border border-white/5 bg-transparent px-2 text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200"
         >
-          返回
+          <X size={13} />
+          <span>返回</span>
         </button>
         <button
           onClick={handleDeleteSelected}
-          className="px-3 py-1 bg-red-700 rounded hover:bg-red-600 transition-colors"
+          className="inline-flex h-7 items-center gap-1 rounded-md bg-red-500/10 px-2 text-red-300 transition-colors hover:bg-red-500/20"
         >
-          移除采样
+          <Trash2 size={13} />
+          <span>移除</span>
         </button>
 
-        {/* 分配到分组下拉菜单 */}
         <div className="relative">
           <button
             onClick={() => setShowGroupDropdown(prev => !prev)}
-            className="px-3 py-1 bg-green-700 rounded hover:bg-green-600 transition-colors"
+            className="inline-flex h-7 items-center gap-1 rounded-md bg-blue-600 px-2 text-white transition-colors hover:bg-blue-500"
           >
-            分配到分组 ▾
+            <Layers3 size={13} />
+            <span>分组</span>
+            <ChevronDown size={13} />
           </button>
           {showGroupDropdown && (
-            <div className="absolute top-full left-0 mt-1 bg-blue-800 border border-blue-600 rounded shadow-lg min-w-[160px] max-h-60 overflow-y-auto z-50">
+            <div className="absolute left-0 top-full z-[100] mt-2 max-h-60 min-w-[180px] overflow-y-auto rounded-lg border border-white/5 bg-zinc-950/95 py-1.5 shadow-lg shadow-black/30 backdrop-blur-xl">
               {groupList.length === 0 ? (
-                <div className="px-3 py-2 text-sm text-blue-200">暂无分组</div>
+                <div className="px-3 py-2 text-xs text-text-dim">暂无分组</div>
               ) : (
                 groupList.map(group => (
                   <button
                     key={group.id}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-blue-700 text-white flex items-center gap-2"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-text-primary transition-colors hover:bg-bg-hover"
                     onClick={() => handleGroupAction(group.id)}
                   >
-                    <span className="w-3 h-3 rounded-full border border-white/30" style={{ backgroundColor: group.color }} />
-                    <span>{group.name}</span>
+                    <span className="h-2.5 w-2.5 rounded-full border border-white/20" style={{ backgroundColor: group.color }} />
+                    <span className="min-w-0 flex-1 truncate">{group.name}</span>
                   </button>
                 ))
               )}
             </div>
           )}
         </div>
-      </div>
+        </div>
     </div>
   )
 }

@@ -7,9 +7,58 @@ html, body, #root {
   width: 100%;
   margin: 0;
   padding: 0;
-  background-color: #0f0f17;
-  color: #fff;
+  background-color: #090a0d;
+  color: #f4f7fb;
   overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input[type="checkbox"] {
+  accent-color: #0a84ff;
+}
+
+input[type="range"] {
+  accent-color: #0a84ff;
+}
+
+select {
+  color-scheme: dark;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border: 3px solid #090a0d;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 /* 允许拖拽的区域 */

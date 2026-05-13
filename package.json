@@ -1,6 +1,6 @@
 {
   "name": "sample-manager",
-  "version": "2.2.2",
+  "version": "2.3.0",
   "description": "鬼畜采样管理工具",
   "main": "./out/main/index.js",
   "scripts": {
@@ -12,6 +12,7 @@
   "dependencies": {
     "@tanstack/react-virtual": "^3.0.1",
     "electron-store": "8.2.0",
+    "lucide-react": "^1.14.0",
     "pinyin-pro": "^3.28.0",
     "uuid": "^13.0.0",
     "zustand": "^4.4.7"

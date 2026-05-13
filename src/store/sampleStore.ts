@@ -832,13 +832,22 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
   }),
 
   removeFolder: (id) => set((state) => {
+    const samples = new Map(state.samples)
+    const groups = new Map(state.groups)
     const folders = new Map(state.folders)
+    const selectedIds = new Set(state.selectedIds)
     const expandedFolderIds = new Set(state.expandedFolderIds)
     const hiddenFolderIds = new Set(state.hiddenFolderIds)
+    const hiddenSampleIds = new Set(state.hiddenSampleIds)
     const folder = folders.get(id)
     if (!folder) return {}
 
     const folderIdsToRemove = collectDescendantFolderIds(id, folders)
+    const sampleIdsToRemove = new Set<string>()
+    folderIdsToRemove.forEach((folderId) => {
+      collectFolderSampleIds(folderId, folders).forEach((sampleId) => sampleIdsToRemove.add(sampleId))
+    })
+
     let folderOrder = state.folderOrder.filter((folderId) => !folderIdsToRemove.includes(folderId))
 
     if (folder.parentId) {
@@ -857,8 +866,31 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
       hiddenFolderIds.delete(folderId)
     }
 
+    for (const sampleId of sampleIdsToRemove) {
+      samples.delete(sampleId)
+      selectedIds.delete(sampleId)
+      hiddenSampleIds.delete(sampleId)
+    }
+
+    for (const [groupId, group] of groups) {
+      groups.set(groupId, {
+        ...group,
+        sampleIds: group.sampleIds.filter((sampleId) => !sampleIdsToRemove.has(sampleId)),
+      })
+    }
+
     folderOrder = [...folderOrder]
-    return { folders, folderOrder, expandedFolderIds, hiddenFolderIds }
+    return {
+      samples,
+      groups,
+      folders,
+      folderOrder,
+      selectedIds,
+      expandedFolderIds,
+      hiddenFolderIds,
+      hiddenSampleIds,
+      lastGroupChangeTimestamp: Date.now(),
+    }
   }),
 
   renameFolder: (id, name) => set((state) => {

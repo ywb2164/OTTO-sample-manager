@@ -32,8 +32,8 @@ declare global {
       openExternalLink: (url: string) => void
       dragOutFiles: (filePaths: string[]) => void
       storeGet: (key: string) => Promise<unknown>
-      storeSet: (key: string, value: unknown) => void
-      storeDelete: (key: string) => void
+      storeSet: (key: string, value: unknown) => Promise<void>
+      storeDelete: (key: string) => Promise<void>
       readFileAsBuffer: (filePath: string) => Promise<ArrayBuffer>
       createLyricsFiles: (payload: {
         targetGroupName: string
@@ -41,7 +41,7 @@ declare global {
       }) => Promise<{
         success: Array<{ id: string; sourcePath: string; targetPath: string; fileSize: number }>
         failed: Array<{ id: string; sourcePath: string; reason: string }>
-        targetDir: string
+        targetDir: string | null
       }>
       checkForUpdates: (options?: ElectronCheckForUpdatesOptions) => Promise<void>
     }

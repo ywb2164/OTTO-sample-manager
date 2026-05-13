@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
+import { ChevronDown, ChevronRight, Folder, Trash2 } from 'lucide-react'
 import { SampleFolder } from '@/types'
 import { useSampleStore } from '@/store/sampleStore'
 
@@ -26,6 +27,7 @@ export const FolderItem: React.FC<Props> = ({
   const [isRenaming, setIsRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState(folder.name)
   const renameInputRef = useRef<HTMLInputElement>(null)
+  const checkboxRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [showDeleteButton, setShowDeleteButton] = useState(false)
   const [touchStartX, setTouchStartX] = useState(0)
@@ -162,7 +164,14 @@ export const FolderItem: React.FC<Props> = ({
 
   // 检查文件夹是否隐藏
   const isChecked = sampleCount > 0 && selectedCount === sampleCount
+  const isPartiallyChecked = selectedCount > 0 && selectedCount < sampleCount
   const leftPadding = 12 + folder.depth * 16
+
+  useEffect(() => {
+    if (checkboxRef.current) {
+      checkboxRef.current.indeterminate = isPartiallyChecked
+    }
+  }, [isPartiallyChecked])
 
   const handleCheckboxChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation()
@@ -180,12 +189,12 @@ export const FolderItem: React.FC<Props> = ({
   return (
     <div
       className={`
-        flex items-center gap-2 px-3 py-1.5
+        group flex h-11 items-center gap-2 px-3
         cursor-pointer select-none
-        border-b border-border
-        transition-colors duration-75
-        bg-bg-secondary hover:bg-bg-hover
-        ${isDragging ? 'opacity-50' : ''}
+        border-b border-white/5
+        transition-[background,box-shadow,transform] duration-150
+        bg-transparent hover:bg-white/[0.035]
+        ${isDragging ? 'scale-[1.01] shadow-xl shadow-black/25' : ''}
         ${isHidden ? 'text-text-dim opacity-60' : ''}
         relative overflow-hidden
       `}
@@ -203,26 +212,21 @@ export const FolderItem: React.FC<Props> = ({
       style={{ paddingLeft: `${leftPadding}px` }}
     >
       <input
+        ref={checkboxRef}
         type="checkbox"
         checked={isChecked}
         onChange={handleCheckboxChange}
         onClick={(e) => e.stopPropagation()}
-        className="w-4 h-4 flex-shrink-0 accent-blue-500"
+        className="h-3.5 w-3.5 flex-shrink-0"
         aria-label={`选择文件夹 ${folder.name}`}
       />
 
-      {/* 展开/收起箭头 */}
-      <div className="w-4 h-4 flex-shrink-0 flex items-center justify-center">
-        {isExpanded ? (
-          <span className="text-text-dim text-xs">▼</span>
-        ) : (
-          <span className="text-text-dim text-xs">▶</span>
-        )}
+      <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center text-zinc-500">
+        {isExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
       </div>
 
-      {/* 文件夹图标 */}
-      <div className="w-4 h-4 flex-shrink-0 flex items-center justify-center">
-        <span className="text-text-dim text-xs">📁</span>
+      <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center text-blue-300/85">
+        <Folder size={15} />
       </div>
 
       {/* 文件夹名称（可重命名） */}
@@ -233,12 +237,12 @@ export const FolderItem: React.FC<Props> = ({
           value={renameValue}
           onChange={(e) => setRenameValue(e.target.value)}
           onBlur={handleRenameConfirm}
-          className="flex-1 text-sm bg-bg-primary text-text-primary border border-accent-primary rounded px-1"
+          className="min-w-0 flex-1 rounded-md border border-blue-500/45 bg-zinc-900/70 px-2 py-1 text-sm text-zinc-100 outline-none"
           onClick={(e) => e.stopPropagation()}
         />
       ) : (
         <span
-          className={`flex-1 text-sm truncate ${isHidden ? 'text-text-dim' : 'text-text-primary'}`}
+          className={`min-w-0 flex-1 truncate text-sm font-medium ${isHidden ? 'text-zinc-600' : 'text-zinc-100'}`}
           title={folder.path}
         >
           {folder.name}
@@ -246,17 +250,18 @@ export const FolderItem: React.FC<Props> = ({
       )}
 
       {/* 样本计数 */}
-      <span className="text-xs text-text-dim flex-shrink-0">
+      <span className="flex-shrink-0 text-right text-xs text-zinc-600">
         {sampleCount} 个样本
       </span>
 
       {/* 左滑删除按钮（仅收起状态） */}
       {!isExpanded && showDeleteButton && (
         <div
-          className="absolute right-0 top-0 bottom-0 flex items-center justify-center bg-red-500 text-white px-3 z-10"
+          className="absolute bottom-0 right-0 top-0 z-10 flex items-center justify-center gap-1 bg-red-500 px-3 text-xs text-white"
           onClick={handleDeleteClick}
         >
-          删除
+          <Trash2 size={14} />
+          <span>删除</span>
         </div>
       )}
     </div>

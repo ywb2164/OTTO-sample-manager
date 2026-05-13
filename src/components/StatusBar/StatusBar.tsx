@@ -1,4 +1,5 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { AudioWaveform, Pause, Play } from 'lucide-react'
 import { usePlayerStore } from '@/store/playerStore'
 import { useSampleStore } from '@/store/sampleStore'
 
@@ -15,8 +16,11 @@ const WaveformDisplay = React.lazy(() =>
 )
 
 const WaveformPlaceholder: React.FC = () => (
-  <div className="w-full h-full bg-gray-800 flex items-center justify-center text-xs text-gray-400">
-    无波形数据
+  <div className="flex h-full w-full items-center justify-center bg-transparent text-xs text-zinc-600">
+    <div className="flex items-center gap-2">
+      <AudioWaveform size={16} />
+      <span>无波形数据</span>
+    </div>
   </div>
 )
 
@@ -121,41 +125,29 @@ export const StatusBar: React.FC<Props> = ({ waveformData, onSeek, onPrimaryActi
     : '--'
 
   return (
-    <div className="flex-shrink-0 border-t border-border bg-bg-secondary">
-      {/* 采样信息栏 */}
-      <div className="flex items-center gap-3 px-3 py-1.5 border-b border-border">
+    <div className="flex-shrink-0 border-t border-white/5 bg-zinc-950/90 p-2.5 backdrop-blur-xl">
+      <div className="mb-1.5 flex min-h-5 items-center gap-2">
         {displaySample ? (
           <>
-            <span className="text-xs text-text-primary font-mono font-medium truncate flex-1">
+            <span className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-100">
               {displaySample.fileName}{displaySample.fileExt}
             </span>
-            {/*<span className="text-xs text-text-dim">
+            <span className="shrink-0 text-[11px] text-zinc-600">
               {sampleRateLabel}
             </span>
-            <span className="text-xs text-text-dim">
+            <span className="shrink-0 text-[11px] text-zinc-600">
               {channelLabel}
             </span>
-            <span className="text-xs text-text-dim">
-              {displaySample.channels === 1 ? '单声道' : '立体声'}
-            </span>
-            */}
-            <span className="text-xs text-text-dim">
-              {sampleRateLabel}
-            </span>
-            <span className="text-xs text-text-dim">
-              {channelLabel}
-            </span>
-            <span className="text-xs text-text-dim font-mono">
+            <span className="hidden shrink-0 font-mono text-[11px] text-zinc-600 min-[440px]:inline">
               {(displaySample.fileSize / 1024).toFixed(1)}KB
             </span>
           </>
         ) : (
-          <span className="text-xs text-text-dim">未选择采样</span>
+          <span className="text-xs text-zinc-600">未选择采样</span>
         )}
       </div>
 
-      {/* 波形区域 */}
-      <div className="h-20 relative">
+      <div className="relative h-14 overflow-hidden rounded-md border border-white/5 bg-transparent">
         {waveformData && waveformData.length > 0 ? (
           <Suspense fallback={<WaveformPlaceholder />}>
             <WaveformDisplay
@@ -169,46 +161,43 @@ export const StatusBar: React.FC<Props> = ({ waveformData, onSeek, onPrimaryActi
         )}
       </div>
 
-      {/* 播放控制栏 */}
-      <div className="flex items-center gap-3 px-3 py-1.5">
-        {/* 播放/暂停按钮 */}
+      <div className="mt-2 flex items-center gap-2.5">
         <button
           className={`
-            w-7 h-7 rounded-full flex items-center justify-center
-            transition-colors text-sm
+            flex h-8 w-8 items-center justify-center rounded-full
+            transition-colors
             ${canControl
-              ? 'bg-accent-primary hover:bg-accent-light text-white'
-              : 'bg-bg-tertiary text-text-dim cursor-not-allowed'}
+              ? 'bg-blue-600 text-white shadow-sm shadow-blue-950/40 hover:bg-blue-500'
+              : 'cursor-not-allowed bg-white/5 text-zinc-600'}
           `}
           onClick={onPrimaryAction}
           disabled={!canControl}
+          title={isPrimaryPlaying ? '暂停' : '播放'}
         >
-          {isPrimaryPlaying ? '⏸' : '▶'}
+          {isPrimaryPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
         </button>
 
-        {/* 时间显示 */}
-        <span className="text-xs text-text-dim font-mono">
+        <span className="w-[104px] flex-shrink-0 font-mono text-[11px] text-zinc-500">
           {formatTime(displayedCurrentTime)}
           <span className="text-text-dim opacity-50"> / </span>
           {formatTime(duration)}
         </span>
 
-        {/* 进度条 */}
         <div
           ref={progressBarRef}
-          className={`flex-1 relative h-5 flex items-center ${canSeek ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
+          className={`relative flex h-6 flex-1 items-center ${canSeek ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
           onClick={handleProgressClick}
           onMouseDown={handleProgressMouseDown}
           aria-disabled={!canSeek}
         >
-          <div className="w-full h-1.5 bg-bg-tertiary rounded-full overflow-hidden">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/5">
             <div
-              className="h-full bg-accent-primary transition-none rounded-full"
+              className="h-full rounded-full bg-blue-600 transition-none"
               style={{ width: `${progressPercentage}%` }}
             />
           </div>
           <div
-            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white shadow-sm border border-accent-primary pointer-events-none"
+            className="pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full border border-blue-500 bg-white shadow-sm"
             style={{ left: `calc(${progressPercentage}% - 6px)` }}
           />
         </div>

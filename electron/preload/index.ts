@@ -32,8 +32,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // 持久化存储
   storeGet: (key: string) => ipcRenderer.invoke('store-get', key),
-  storeSet: (key: string, value: unknown) => ipcRenderer.send('store-set', key, value),
-  storeDelete: (key: string) => ipcRenderer.send('store-delete', key),
+  storeSet: (key: string, value: unknown) => ipcRenderer.invoke('store-set', key, value),
+  storeDelete: (key: string) => ipcRenderer.invoke('store-delete', key),
   
   // 读取文件为ArrayBuffer（用于音频解码）
   readFileAsBuffer: (filePath: string): Promise<ArrayBuffer> => {
@@ -75,8 +75,8 @@ declare global {
       openExternalLink: (url: string) => void
       dragOutFiles: (filePaths: string[]) => void
       storeGet: (key: string) => Promise<unknown>
-      storeSet: (key: string, value: unknown) => void
-      storeDelete: (key: string) => void
+      storeSet: (key: string, value: unknown) => Promise<void>
+      storeDelete: (key: string) => Promise<void>
       readFileAsBuffer: (filePath: string) => Promise<ArrayBuffer>
       createLyricsFiles: (payload: {
         targetGroupName: string
@@ -84,7 +84,7 @@ declare global {
       }) => Promise<{
         success: Array<{ id: string; sourcePath: string; targetPath: string; fileSize: number }>
         failed: Array<{ id: string; sourcePath: string; reason: string }>
-        targetDir: string
+        targetDir: string | null
       }>
       checkForUpdates: (options?: {
         silentIfNoUpdate?: boolean

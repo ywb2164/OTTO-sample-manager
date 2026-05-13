@@ -1,5 +1,21 @@
-import React, { useState, useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
+import {
+  CheckCircle2,
+  ChevronDown,
+  Download,
+  ExternalLink,
+  Files,
+  FolderDown,
+  Minus,
+  Pin,
+  PinOff,
+  Settings,
+  Sparkles,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { useSampleStore } from '@/store/sampleStore'
+import appIconUrl from '../../tmp-app-icon.png'
 
 interface Props {
   onImportFiles: () => void
@@ -9,7 +25,13 @@ interface Props {
   isImporting: boolean
 }
 
-export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onAssembleLyrics, onRemoveAllImported, isImporting }) => {
+export const TitleBar: React.FC<Props> = ({
+  onImportFiles,
+  onImportFolder,
+  onAssembleLyrics,
+  onRemoveAllImported,
+  isImporting,
+}) => {
   const [alwaysOnTop, setAlwaysOnTop] = useState(true)
   const [opacity, setOpacity] = useState(1.0)
   const [appVersion, setAppVersion] = useState('')
@@ -28,16 +50,8 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onAss
 
   useEffect(() => {
     window.electronAPI.getAlwaysOnTop().then(setAlwaysOnTop)
-  }, [])
-
-  useEffect(() => {
     window.electronAPI.getOpacity().then(setOpacity)
-  }, [])
-
-  useEffect(() => {
-    window.electronAPI.getAppVersion().then(setAppVersion).catch(() => {
-      setAppVersion('')
-    })
+    window.electronAPI.getAppVersion().then(setAppVersion).catch(() => setAppVersion(''))
   }, [])
 
   useEffect(() => {
@@ -65,29 +79,27 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onAss
     window.electronAPI.setOpacity(value)
   }
 
-  const updateCopySettings = (next: { enableAutoCopy?: boolean; keepCopies?: boolean }) => {
+  const updateCopySettings = async (next: { enableAutoCopy?: boolean; keepCopies?: boolean }) => {
+    const previousSettings = {
+      enableAutoCopy,
+      keepCopies,
+    }
     const nextSettings = {
       enableAutoCopy,
       keepCopies,
       ...next
     }
 
-    if (next.enableAutoCopy !== undefined) {
-      setEnableAutoCopy(next.enableAutoCopy)
+    try {
+      if (next.enableAutoCopy !== undefined) setEnableAutoCopy(next.enableAutoCopy)
+      if (next.keepCopies !== undefined) setKeepCopies(next.keepCopies)
+
+      await window.electronAPI.storeSet('copySettings', nextSettings)
+    } catch {
+      setEnableAutoCopy(previousSettings.enableAutoCopy)
+      setKeepCopies(previousSettings.keepCopies)
+      window.alert('副本设置保存失败，请重试。')
     }
-    if (next.keepCopies !== undefined) {
-      setKeepCopies(next.keepCopies)
-    }
-
-    window.electronAPI.storeSet('copySettings', nextSettings)
-  }
-
-  const handleEnableAutoCopyChange = (value: boolean) => {
-    updateCopySettings({ enableAutoCopy: value })
-  }
-
-  const handleKeepCopiesChange = (value: boolean) => {
-    updateCopySettings({ keepCopies: value })
   }
 
   const handleOpenLink = (url: string) => {
@@ -108,279 +120,230 @@ export const TitleBar: React.FC<Props> = ({ onImportFiles, onImportFolder, onAss
     }
   }
 
-  const actionButtonClassName =
-    'inline-flex h-8 items-center justify-center rounded px-3 text-xs leading-none text-white transition-colors whitespace-nowrap'
-
-  const primaryActionButtonClassName = `${actionButtonClassName} ${
-    isImporting
-      ? 'bg-accent-primary/60 cursor-not-allowed'
-      : 'bg-accent-primary/85 hover:bg-accent-primary'
-  }`
-
-  const BilibiliIcon = () => (
-    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M7.2 3.4a1 1 0 0 1 1.4 0l1.6 1.5h3.6l1.6-1.5a1 1 0 0 1 1.4 1.4l-.1.1h1.3A2.9 2.9 0 0 1 21 7.8v8.4a2.9 2.9 0 0 1-2.9 2.9H5.9A2.9 2.9 0 0 1 3 16.2V7.8a2.9 2.9 0 0 1 2.9-2.9h1.3l-.1-.1a1 1 0 0 1 0-1.4ZM5.9 6.9a.9.9 0 0 0-.9.9v8.4c0 .5.4.9.9.9h12.2c.5 0 .9-.4.9-.9V7.8a.9.9 0 0 0-.9-.9Zm2.6 2.4a1 1 0 0 1 1 1v3.4a1 1 0 1 1-2 0v-3.4a1 1 0 0 1 1-1Zm7 0a1 1 0 0 1 1 1v3.4a1 1 0 1 1-2 0v-3.4a1 1 0 0 1 1-1Z"
-      />
-    </svg>
-  )
-
-  const GithubIcon = () => (
-    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M12 .5A12 12 0 0 0 8.2 23.9c.6.1.8-.2.8-.6v-2.3c-3.3.7-4-1.4-4-1.4-.6-1.4-1.3-1.8-1.3-1.8-1.1-.8 0-.8 0-.8 1.2 0 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.6-1.3-5.6-6A4.7 4.7 0 0 1 5.2 8c-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.3 11.3 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.1a4.7 4.7 0 0 1 1.2 3.3c0 4.7-2.9 5.7-5.6 6 .4.3.8 1 .8 2.1v3.1c0 .4.2.7.8.6A12 12 0 0 0 12 .5Z"
-      />
-    </svg>
-  )
+  const iconButtonClassName =
+    'inline-flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary'
+  const menuPanelClassName =
+    'absolute top-full right-0 mt-2 z-[100] rounded-lg border border-white/5 bg-zinc-950/95 shadow-lg shadow-black/30 backdrop-blur-xl'
 
   return (
-    // -webkit-app-region: drag 让这个区域可以拖动窗口
     <div
-      className="flex items-center h-9 px-3 gap-2 bg-bg-secondary border-b border-border flex-shrink-0"
+      className="relative z-50 flex h-10 flex-shrink-0 items-center gap-1.5 overflow-visible border-b border-white/5 bg-zinc-950/90 px-2.5 backdrop-blur-xl"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
-      {/* 标题 */}
-      <span className="text-xs text-text-secondary flex-1 font-medium">
-        🎵 采样管理器
-      </span>
+      <div className="flex min-w-0 flex-1 items-center gap-2 text-text-secondary">
+        <img src={appIconUrl} alt="" className="h-6 w-6 flex-shrink-0 rounded-md object-contain" />
+        <span className="truncate text-xs font-medium">采样管理器</span>
+      </div>
 
-      {/* 控制按钮区（不参与拖动）*/}
       <div
-        className="flex items-center gap-1"
+        className="flex items-center gap-1.5"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
         <button
-          className={primaryActionButtonClassName}
+          className="inline-flex h-7 items-center gap-1 rounded-md bg-accent-primary px-2.5 text-xs font-medium text-white shadow-sm shadow-accent-primary/20 transition-colors hover:bg-accent-light disabled:cursor-not-allowed disabled:opacity-60"
           onClick={onAssembleLyrics}
           disabled={isImporting}
+          title="活字印刷生成"
         >
-          活字印刷生成
+          <Sparkles size={13} />
+          <span className="hidden min-[430px]:inline">活字印刷</span>
         </button>
 
-        {/* 导入菜单 */}
         <div className="relative">
           <button
-            className={primaryActionButtonClassName}
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-border-subtle bg-bg-elevated/80 px-2 text-xs font-medium text-text-primary transition-colors hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-60"
             onClick={() => {
               if (isImporting) return
-              setShowImportMenu(!showImportMenu)
+              setShowImportMenu(prev => !prev)
+              setShowSettingsMenu(false)
             }}
             disabled={isImporting}
           >
-            <span>{isImporting ? '导入中...' : '导入'}</span>
-            {!isImporting && (
-              <span className="ml-1 inline-flex items-center text-[10px] leading-none">
-                ▾
-              </span>
-            )}
+            <Download size={13} />
+            <span>{isImporting ? '导入中' : '导入'}</span>
+            {!isImporting && <ChevronDown size={12} />}
           </button>
           {showImportMenu && !isImporting && (
-            <div className="absolute top-full right-0 mt-1 bg-bg-tertiary border border-border rounded shadow-lg z-50 min-w-32">
+            <div className={`${menuPanelClassName} min-w-40 py-1.5`}>
               <button
-                className="block w-full text-left text-xs px-3 py-2 hover:bg-bg-hover text-text-primary"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-text-primary transition-colors hover:bg-bg-hover"
                 onClick={() => { onImportFiles(); setShowImportMenu(false) }}
               >
-                导入文件
+                <Files size={14} />
+                <span>导入文件</span>
               </button>
               <button
-                className="block w-full text-left text-xs px-3 py-2 hover:bg-bg-hover text-text-primary"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-text-primary transition-colors hover:bg-bg-hover"
                 onClick={() => { onImportFolder(); setShowImportMenu(false) }}
               >
-                导入文件夹
+                <FolderDown size={14} />
+                <span>导入文件夹</span>
               </button>
-              <div className="border-t border-border my-1"></div>
+              <div className="my-1 border-t border-border-subtle" />
               <button
-                className="block w-full text-left text-xs px-3 py-2 hover:bg-bg-hover text-red-400"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-red-300 transition-colors hover:bg-red-500/10"
                 onClick={() => { onRemoveAllImported(); setShowImportMenu(false) }}
               >
-                移除全部导入
+                <Trash2 size={14} />
+                <span>移除全部导入</span>
               </button>
             </div>
           )}
         </div>
 
-        {/* 设置按钮 */}
         <div className="relative">
           <button
-            className="text-xs px-2 py-1 rounded text-text-dim hover:text-text-primary transition-colors"
-            onClick={() => setShowSettingsMenu(!showSettingsMenu)}
+            className={iconButtonClassName}
+            onClick={() => {
+              setShowSettingsMenu(prev => !prev)
+              setShowImportMenu(false)
+            }}
             title="设置"
           >
-            ⚙
+            <Settings size={15} />
           </button>
           {showSettingsMenu && (
-            <div className="absolute top-full right-0 mt-1 bg-bg-tertiary border border-border rounded shadow-lg z-50 min-w-48 p-2">
-              <label className="flex items-center gap-2 text-xs text-text-primary cursor-pointer">
-                <input
-                  type="checkbox"
+            <div className={`${menuPanelClassName} w-72 p-3`}>
+              <div className="space-y-3">
+                <SettingCheckbox
                   checked={folderSettings.expandOnSearch}
-                  onChange={(e) => setExpandOnSearch(e.target.checked)}
+                  label="搜索时展开文件夹"
+                  onChange={setExpandOnSearch}
                 />
-                <span>搜索时文件栏展开/收回</span>
-              </label>
-              <div className="border-t border-border my-2"></div>
-              <label className="flex items-center gap-2 text-xs text-text-primary cursor-pointer">
-                <input
-                  type="checkbox"
+                <SettingCheckbox
                   checked={folderSettings.folderClassificationEnabled}
-                  onChange={(e) => setFolderClassificationEnabled(e.target.checked)}
+                  label="按文件夹分类"
+                  onChange={setFolderClassificationEnabled}
                 />
-                <span>按文件夹分类</span>
-              </label>
-              <div className="border-t border-border my-2"></div>
-              <label className="flex items-center gap-2 text-xs text-text-primary cursor-pointer">
-                <input
-                  type="checkbox"
+                <SettingCheckbox
                   checked={folderSettings.enableChinesePinyinFuzzySearch}
-                  onChange={(e) => setEnableChinesePinyinFuzzySearch(e.target.checked)}
+                  label="中文模糊搜索"
+                  note="仅将中文查询扩展为同音素材名。"
+                  onChange={setEnableChinesePinyinFuzzySearch}
                 />
-                <span>中文模糊搜索</span>
-              </label>
-              <div className="text-[11px] text-text-dim mt-1 leading-4">
-                仅将中文查询扩展为同音的中文素材名（纯拼音的文件除外）
-              </div>
-              <div className="border-t border-border my-2"></div>
-              <label className="flex items-center gap-2 text-xs text-text-primary cursor-pointer">
-                <input
-                  type="checkbox"
+                <SettingCheckbox
                   checked={enableAutoCopy}
-                  onChange={(e) => handleEnableAutoCopyChange(e.target.checked)}
+                  label="启用自动副本"
+                  note="单个素材可多次使用且分别独立。"
+                  onChange={(value) => updateCopySettings({ enableAutoCopy: value })}
                 />
-                <span>启用自动副本</span>
-              </label>
-              <div className="text-[11px] text-text-dim mt-1 leading-4">
-                勾选后，单个素材可多次使用且分别独立
-              </div>
-              <div className="border-t border-border my-2"></div>
-              <label className="flex items-center gap-2 text-xs text-text-primary cursor-pointer">
-                <input
-                  type="checkbox"
+                <SettingCheckbox
                   checked={keepCopies}
-                  onChange={(e) => handleKeepCopiesChange(e.target.checked)}
+                  label="保留自动副本"
+                  note="关闭时清理拖拽生成的外部编辑副本。"
+                  onChange={(value) => updateCopySettings({ keepCopies: value })}
                 />
-                <span>保留自动副本</span>
-              </label>
-              <div className="text-[11px] text-text-dim mt-1 leading-4">
-                关闭时默认清理拖拽生成的外部编辑副本
-              </div>
-              <div className="border-t border-border my-2"></div>
-              <label className="flex items-center gap-2 text-xs text-text-primary cursor-pointer">
-                <input
-                  type="checkbox"
+                <SettingCheckbox
                   checked={folderSettings.memoryOptimizationMode}
-                  onChange={(e) => setMemoryOptimizationMode(e.target.checked)}
+                  label="内存优化模式"
+                  note="仅加载当前可见范围附近的音频数据。"
+                  onChange={setMemoryOptimizationMode}
                 />
-                <span>内存优化模式</span>
-              </label>
-              <div className="text-[11px] text-text-dim mt-1 leading-4">
-                如怕爆内存可用，加载当前分组、“全部”的可见1-10（并非前10个）
-              </div>
-              <div className="border-t border-border my-2"></div>
-              <div className="flex justify-between items-center text-xs text-text-primary w-full gap-2">
-                <span className="whitespace-nowrap">窗口透明度:</span>
-                <input
-                  type="range"
-                  min="0.2"
-                  max="1.0"
-                  step="any"
-                  value={opacity}
-                  className="flex-1"
-                  onChange={(e) => handleOpacityChange(parseFloat(e.target.value))}
-                />
-                <span className="text-xs text-text-dim w-8 text-right whitespace-nowrap">
-                  {opacity.toFixed(2)}
-                </span>
-              </div>
-              <div className="border-t border-border my-2"></div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2 text-xs text-text-primary">
-                  <span>当前版本：{appVersion || '读取中...'}</span>
-                  <button
-                    className={`inline-flex items-center justify-center rounded px-2.5 py-1.5 text-xs transition-colors ${
-                      isCheckingForUpdates
-                        ? 'bg-accent-primary/60 text-white cursor-wait'
-                        : 'bg-accent-primary/85 hover:bg-accent-primary text-white'
-                    }`}
-                    onClick={handleCheckForUpdates}
-                    disabled={isCheckingForUpdates}
-                  >
-                    {isCheckingForUpdates ? '检查中...' : '检查更新'}
-                  </button>
+
+                <div className="border-t border-border-subtle pt-3">
+                  <div className="mb-2 flex items-center justify-between text-xs text-text-secondary">
+                    <span>窗口透明度</span>
+                    <span className="font-mono text-text-muted">{opacity.toFixed(2)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.2"
+                    max="1.0"
+                    step="any"
+                    value={opacity}
+                    className="w-full"
+                    onChange={(e) => handleOpacityChange(parseFloat(e.target.value))}
+                  />
                 </div>
-                <div className="text-[11px] text-text-dim leading-4">
-                  手动检查会提示新版本、已是最新版本，或检查失败。
+
+                <div className="border-t border-border-subtle pt-3">
+                  <div className="mb-2 flex items-center justify-between gap-2 text-xs text-text-secondary">
+                    <span className="truncate">版本 {appVersion || '读取中'}</span>
+                    <button
+                      className="inline-flex items-center gap-1 rounded-md bg-accent-dim px-2 py-1.5 text-xs text-accent-light transition-colors hover:bg-accent-primary/25 disabled:cursor-wait disabled:opacity-70"
+                      onClick={handleCheckForUpdates}
+                      disabled={isCheckingForUpdates}
+                    >
+                      <CheckCircle2 size={13} />
+                      <span>{isCheckingForUpdates ? '检查中' : '检查更新'}</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div className="border-t border-border my-2"></div>
-              <div className="space-y-1">
-                <div className="text-[11px] text-text-dim text-center">Authors</div>
-                <div className="flex items-center justify-center gap-2">
-                  <button
-                    className="inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded hover:bg-bg-hover text-text-primary text-xs"
-                    onClick={() => handleOpenLink('https://space.bilibili.com/1042301441')}
-                  >
-                    <span className="text-sky-400">
-                      <BilibiliIcon />
-                    </span>
-                    <span className="whitespace-nowrap">杨薇柏_Official</span>
-                  </button>
-                  <button
-                    className="inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded hover:bg-bg-hover text-text-primary text-xs"
-                    onClick={() => handleOpenLink('https://space.bilibili.com/364700163')}
-                  >
-                    <span className="text-sky-400">
-                      <BilibiliIcon />
-                    </span>
-                    <span className="whitespace-nowrap">_Candace_</span>
-                  </button>
-                </div>
-                <div className="flex justify-center">
-                  <button
-                    className="inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded hover:bg-bg-hover text-text-primary text-xs"
-                    onClick={() => handleOpenLink('https://github.com/ywb2164/OTTO-sample-manager')}
-                  >
-                    <span className="text-text-dim">
-                      <GithubIcon />
-                    </span>
-                    <span className="whitespace-nowrap">Github</span>
-                  </button>
+
+                <div className="border-t border-border-subtle pt-3">
+                  <div className="mb-2 text-center text-[11px] text-text-dim">Authors</div>
+                  <div className="grid grid-cols-1 gap-1">
+                    <ExternalButton label="杨薇柏_Official" onClick={() => handleOpenLink('https://space.bilibili.com/1042301441')} />
+                    <ExternalButton label="_Candace_" onClick={() => handleOpenLink('https://space.bilibili.com/364700163')} />
+                    <button
+                      className="inline-flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+                      onClick={() => handleOpenLink('https://github.com/ywb2164/OTTO-sample-manager')}
+                    >
+                      <ExternalLink size={13} />
+                      <span>Github</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           )}
         </div>
 
-        {/* 置顶按钮 */}
         <button
-          className={`text-xs px-2 py-1 rounded transition-colors ${
-            alwaysOnTop
-              ? 'bg-accent-dim text-accent-light'
-              : 'text-text-dim hover:text-text-primary'
-          }`}
+          className={`${iconButtonClassName} ${alwaysOnTop ? 'bg-accent-dim text-accent-light' : ''}`}
           onClick={toggleAlwaysOnTop}
           title={alwaysOnTop ? '取消置顶' : '窗口置顶'}
         >
-          📌
+          {alwaysOnTop ? <Pin size={15} /> : <PinOff size={15} />}
         </button>
 
-        {/* 最小化 */}
+        <div className="ml-1 h-5 w-px bg-border-subtle" />
+
         <button
-          className="text-xs w-6 h-6 flex items-center justify-center rounded hover:bg-bg-hover text-text-dim"
+          className={iconButtonClassName}
           onClick={() => window.electronAPI.minimizeWindow()}
+          title="最小化"
         >
-          ─
+          <Minus size={15} />
         </button>
-
-        {/* 关闭 */}
         <button
-          className="text-xs w-6 h-6 flex items-center justify-center rounded hover:bg-red-600 text-text-dim"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-red-500/90 hover:text-white"
           onClick={() => window.electronAPI.closeWindow()}
+          title="关闭"
         >
-          ✕
+          <X size={15} />
         </button>
       </div>
     </div>
   )
 }
+
+const SettingCheckbox: React.FC<{
+  checked: boolean
+  label: string
+  note?: string
+  onChange: (value: boolean) => void
+}> = ({ checked, label, note, onChange }) => (
+  <label className="flex cursor-pointer items-start gap-2 text-xs text-text-primary">
+    <input
+      type="checkbox"
+      checked={checked}
+      onChange={(e) => onChange(e.target.checked)}
+      className="mt-0.5 h-3.5 w-3.5 flex-shrink-0"
+    />
+    <span className="min-w-0">
+      <span className="block">{label}</span>
+      {note && <span className="mt-0.5 block text-[11px] leading-4 text-text-dim">{note}</span>}
+    </span>
+  </label>
+)
+
+const ExternalButton: React.FC<{ label: string; onClick: () => void }> = ({ label, onClick }) => (
+  <button
+    className="inline-flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+    onClick={onClick}
+  >
+    <ExternalLink size={13} />
+    <span className="truncate">{label}</span>
+  </button>
+)

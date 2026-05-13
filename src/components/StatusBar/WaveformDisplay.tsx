@@ -46,10 +46,9 @@ export const WaveformDisplay: React.FC<Props> = ({ waveformData, duration, onSee
     // 清除画布
     ctx.clearRect(0, 0, dimensions.width, dimensions.height)
 
-    // 设置样式
-    const waveformColor = '#4f46e5' // indigo-600
-    const backgroundColor = '#1f2937' // gray-800
-    const centerLineColor = '#4b5563' // gray-600
+    const waveformColor = '#a1a1aa'
+    const backgroundColor = 'rgba(0, 0, 0, 0)'
+    const centerLineColor = 'rgba(255, 255, 255, 0.08)'
 
     // 绘制背景
     ctx.fillStyle = backgroundColor
@@ -100,22 +99,22 @@ export const WaveformDisplay: React.FC<Props> = ({ waveformData, duration, onSee
 
       // 创建渐变填充
       const gradient = ctx.createLinearGradient(0, 0, 0, dimensions.height)
-      gradient.addColorStop(0, waveformColor)
-      gradient.addColorStop(0.5, '#7c3aed') // indigo-500
-      gradient.addColorStop(1, waveformColor)
+      gradient.addColorStop(0, '#d4d4d8')
+      gradient.addColorStop(0.5, waveformColor)
+      gradient.addColorStop(1, '#71717a')
 
       ctx.fillStyle = gradient
       ctx.fill()
 
       // 绘制波形轮廓
-      ctx.strokeStyle = '#818cf8' // indigo-400
-      ctx.lineWidth = 1
+      ctx.strokeStyle = 'rgba(244, 244, 245, 0.42)'
+      ctx.lineWidth = 0.75
       ctx.stroke()
     }
 
     // 绘制"无波形数据"提示
     if (waveformData.length === 0) {
-      ctx.fillStyle = '#9ca3af'
+      ctx.fillStyle = '#52525b'
       ctx.font = '12px sans-serif'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
@@ -140,7 +139,7 @@ export const WaveformDisplay: React.FC<Props> = ({ waveformData, duration, onSee
 
   if (!waveformData || waveformData.length === 0) {
     return (
-      <div ref={containerRef} className="w-full h-full bg-gray-800 flex items-center justify-center text-xs text-gray-400">
+      <div ref={containerRef} className="flex h-full w-full items-center justify-center bg-transparent text-xs text-zinc-600">
         无波形数据
       </div>
     )

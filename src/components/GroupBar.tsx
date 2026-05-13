@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { Check, Edit3, Plus, Trash2, X } from 'lucide-react'
 import { useSampleStore } from '@/store/sampleStore'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -104,14 +105,14 @@ export const GroupBar: React.FC = () => {
   }, [])
 
   return (
-    <div className="p-2 border-b border-border-primary overflow-x-auto overflow-y-hidden">
-      <div className="flex items-center gap-2 min-w-max whitespace-nowrap">
+    <div className="border-b border-white/5 bg-zinc-950 px-3 py-2 overflow-x-auto overflow-y-hidden">
+      <div className="flex min-w-max items-center gap-2 whitespace-nowrap">
         <button
           onClick={() => handleSelectGroup(null)}
-          className={`shrink-0 px-3 py-1 rounded text-sm whitespace-nowrap ${
+          className={`shrink-0 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
             activeGroupId === null
-              ? 'bg-bg-secondary text-text-primary'
-              : 'bg-bg-tertiary text-text-secondary hover:bg-bg-secondary'
+              ? 'border-blue-500/35 bg-blue-500/10 text-blue-300'
+              : 'border-white/5 bg-transparent text-zinc-500 hover:bg-white/[0.035] hover:text-zinc-200'
           }`}
         >
           全部
@@ -120,7 +121,7 @@ export const GroupBar: React.FC = () => {
         {Array.from(groups.values()).map((group) => (
           <div key={group.id} className="relative shrink-0">
             {editingGroupId === group.id ? (
-              <div className="flex items-center gap-1 shrink-0">
+              <div className="flex shrink-0 items-center gap-1">
                 <input
                   type="text"
                   value={editingGroupName}
@@ -132,44 +133,47 @@ export const GroupBar: React.FC = () => {
                       setEditingGroupName('')
                     }
                   }}
-                  className="px-3 py-1 rounded text-sm bg-bg-tertiary text-text-primary border border-border focus:outline-none focus:border-accent-primary"
+                  className="h-8 rounded-md border border-white/10 bg-zinc-900/60 px-3 text-xs text-zinc-100 outline-none focus:border-blue-500/45"
                   autoFocus
                 />
                 <button
                   onClick={handleSaveEdit}
-                  className="shrink-0 px-2 py-1 rounded text-sm bg-green-600 hover:bg-green-700 text-white whitespace-nowrap"
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-600 text-white transition-colors hover:bg-blue-500"
+                  title="保存"
                 >
-                  保存
+                  <Check size={14} />
                 </button>
                 <button
                   onClick={() => {
                     setEditingGroupId(null)
                     setEditingGroupName('')
                   }}
-                  className="shrink-0 px-2 py-1 rounded text-sm bg-red-600 hover:bg-red-700 text-white whitespace-nowrap"
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/5 bg-transparent text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200"
+                  title="取消"
                 >
-                  取消
+                  <X size={14} />
                 </button>
               </div>
             ) : (
               <button
                 onClick={() => handleSelectGroup(group.id)}
                 onContextMenu={(e) => handleGroupContextMenu(e, group.id)}
-                className={`shrink-0 px-3 py-1 rounded text-sm whitespace-nowrap ${
+                className={`inline-flex shrink-0 items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
                   activeGroupId === group.id
-                    ? 'bg-bg-secondary text-text-primary'
-                    : 'bg-bg-tertiary text-text-secondary hover:bg-bg-secondary'
+                    ? 'border-blue-500/35 bg-blue-500/10 text-blue-300'
+                    : 'border-white/5 bg-transparent text-zinc-500 hover:bg-white/[0.035] hover:text-zinc-200'
                 }`}
-                style={{ borderLeft: `4px solid ${group.color}` }}
               >
-                {group.name} ({group.sampleIds.length})
+                <span className="h-2 w-2 rounded-full border border-white/20" style={{ backgroundColor: group.color }} />
+                <span>{group.name}</span>
+                <span className="font-mono text-[11px] text-zinc-600">{group.sampleIds.length}</span>
               </button>
             )}
           </div>
         ))}
 
         {isCreatingGroup ? (
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex shrink-0 items-center gap-1">
             <input
               type="text"
               value={newGroupName}
@@ -182,31 +186,34 @@ export const GroupBar: React.FC = () => {
                 }
               }}
               placeholder="分组名称"
-              className="px-3 py-1 rounded text-sm bg-bg-tertiary text-text-primary border border-border focus:outline-none focus:border-accent-primary"
+              className="h-8 rounded-md border border-white/10 bg-zinc-900/60 px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-blue-500/45"
               autoFocus
             />
             <button
               onClick={handleCreateGroup}
-              className="shrink-0 px-2 py-1 rounded text-sm bg-accent-primary hover:bg-accent-light text-white whitespace-nowrap"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-600 text-white transition-colors hover:bg-blue-500"
+              title="创建"
             >
-              创建
+              <Check size={14} />
             </button>
             <button
               onClick={() => {
                 setIsCreatingGroup(false)
                 setNewGroupName('')
               }}
-              className="shrink-0 px-2 py-1 rounded text-sm bg-red-600 hover:bg-red-700 text-white whitespace-nowrap"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/5 bg-transparent text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200"
+              title="取消"
             >
-              取消
+              <X size={14} />
             </button>
           </div>
         ) : (
           <button
             onClick={() => setIsCreatingGroup(true)}
-            className="shrink-0 px-3 py-1 rounded text-sm bg-bg-tertiary text-text-secondary hover:bg-bg-secondary whitespace-nowrap"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/5 bg-transparent text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200"
+            title="新建分组"
           >
-            + 新建分组
+            <Plus size={15} />
           </button>
         )}
       </div>
@@ -214,7 +221,7 @@ export const GroupBar: React.FC = () => {
       {/* 右键菜单 */}
       {contextMenu && (
         <div
-          className="fixed z-50 bg-bg-elevated border border-border rounded-md shadow-lg min-w-[160px] py-1"
+          className="fixed z-[100] min-w-[160px] rounded-lg border border-white/5 bg-zinc-950/95 py-1.5 shadow-lg shadow-black/30 backdrop-blur-xl"
           style={{
             left: `${contextMenu.x}px`,
             top: `${contextMenu.y}px`,
@@ -222,16 +229,18 @@ export const GroupBar: React.FC = () => {
           onClick={(e) => e.stopPropagation()}
         >
           <button
-            className="w-full text-left px-4 py-2 text-sm hover:bg-bg-hover text-text-primary"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-text-primary transition-colors hover:bg-bg-hover"
             onClick={() => handleEditFromContextMenu(contextMenu.groupId)}
           >
-            重命名
+            <Edit3 size={14} />
+            <span>重命名</span>
           </button>
           <button
-            className="w-full text-left px-4 py-2 text-sm hover:bg-bg-hover text-red-400"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-red-300 transition-colors hover:bg-red-500/10"
             onClick={() => handleDeleteFromContextMenu(contextMenu.groupId)}
           >
-            删除
+            <Trash2 size={14} />
+            <span>删除</span>
           </button>
         </div>
       )}

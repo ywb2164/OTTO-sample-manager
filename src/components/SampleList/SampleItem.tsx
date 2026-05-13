@@ -1,4 +1,5 @@
-import React, { useCallback } from 'react'
+import React, { useCallback, useState } from 'react'
+import { AlertTriangle, Play } from 'lucide-react'
 import { Sample } from '@/types'
 import { useSampleStore } from '@/store/sampleStore'
 
@@ -17,6 +18,7 @@ export const SampleItem: React.FC<Props> = ({
   onPlay,
   onSelect,
 }) => {
+  const [isDraggingOut, setIsDraggingOut] = useState(false)
   const anchorId = useSampleStore((state) => state.anchorId)
   const getOrderedIds = useSampleStore((state) => state.getOrderedIds)
   const selectRange = useSampleStore((state) => state.selectRange)
@@ -48,6 +50,8 @@ export const SampleItem: React.FC<Props> = ({
   // 拖出到DAW
   const handleDragStart = useCallback((e: React.DragEvent) => {
     e.preventDefault()
+    setIsDraggingOut(true)
+    window.setTimeout(() => setIsDraggingOut(false), 180)
 
     const { selectedIds } = useSampleStore.getState()
     
@@ -91,11 +95,12 @@ export const SampleItem: React.FC<Props> = ({
   return (
     <div
       className={`
-        flex items-center gap-2 px-3 py-1.5
+        group flex h-11 items-center gap-2 px-3
         cursor-pointer select-none
-        border-b border-border
-        transition-colors duration-75
-        ${isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover'}
+        border-b border-white/5
+        transition-[background,box-shadow,transform] duration-150
+        ${isSelected ? 'bg-blue-500/10' : 'hover:bg-white/[0.035]'}
+        ${isDraggingOut ? 'scale-[1.01] shadow-xl shadow-black/25' : ''}
         ${!sample.isFileValid ? 'opacity-40' : ''}
         ${isHidden ? 'text-text-dim opacity-60' : ''}
       `}
@@ -107,34 +112,33 @@ export const SampleItem: React.FC<Props> = ({
     >
       {/* 选中指示器 */}
       <div className={`
-        w-1 h-5 rounded-full flex-shrink-0
-        ${isSelected ? 'bg-accent-primary' : 'bg-transparent'}
+        h-6 w-0.5 flex-shrink-0 rounded-full
+        ${isSelected ? 'bg-blue-500' : 'bg-transparent'}
       `} />
 
-      {/* 播放状态图标 */}
-      <div className="w-4 h-4 flex-shrink-0 flex items-center justify-center">
-        {isPlaying ? (
-          <span className="text-accent-light text-xs animate-pulse">▶</span>
-        ) : (
-          <span className="text-text-dim text-xs opacity-0 group-hover:opacity-100">▶</span>
-        )}
+      <div className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md transition-colors ${
+        isPlaying
+          ? 'text-blue-300'
+          : 'text-zinc-500 opacity-0 group-hover:opacity-100'
+      }`}>
+        <Play size={13} fill="currentColor" />
       </div>
 
       {/* 文件名 */}
       <span
-        className={`flex-1 text-sm truncate font-mono ${isHidden ? 'text-text-dim' : 'text-text-primary'}`}
+        className={`min-w-0 flex-1 truncate text-sm ${isHidden ? 'text-zinc-600' : 'text-zinc-100'}`}
         title={sample.filePath}  // hover显示完整路径
       >
-        {sample.fileName}
-        <span className="text-text-dim text-xs">{sample.fileExt}</span>
+        <span className="font-medium">{sample.fileName}</span>
+        <span className="ml-0.5 text-xs text-zinc-600">{sample.fileExt}</span>
       </span>
 
       {/* 分组标签 */}
-      <div className="flex gap-1 flex-shrink-0">
+      <div className="hidden max-w-[28%] flex-shrink-0 gap-1 overflow-hidden min-[520px]:flex">
         {groupNames.slice(0, 2).map(name => (
           <span
             key={name}
-            className="text-xs px-1.5 py-0.5 rounded bg-accent-dim text-accent-light"
+            className="truncate rounded border border-white/10 bg-transparent px-1.5 py-0.5 text-[11px] text-zinc-500"
           >
             {name}
           </span>
@@ -142,14 +146,14 @@ export const SampleItem: React.FC<Props> = ({
       </div>
 
       {/* 时长 */}
-      <span className="text-xs text-text-dim flex-shrink-0 w-16 text-right font-mono">
+      <span className="w-16 flex-shrink-0 text-right font-mono text-xs text-zinc-600">
         {formatDuration(sample.duration)}
       </span>
 
       {/* 文件丢失提示 */}
       {!sample.isFileValid && (
-        <span className="text-xs text-red-400 flex-shrink-0" title="文件已移动或删除">
-          ⚠
+        <span className="flex-shrink-0 text-red-300" title="文件已移动或删除">
+          <AlertTriangle size={14} />
         </span>
       )}
     </div>
