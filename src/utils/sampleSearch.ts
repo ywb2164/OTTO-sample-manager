@@ -15,6 +15,7 @@ type MatchKind =
   | 'extended'
   | 'fuzzy'
   | 'direct-chinese'
+  | 'chinese-pinyin-prefix'
   | 'fallback'
 
 type SearchKeyword = {
@@ -46,7 +47,6 @@ export type SampleSearchIndex = {
   fileNameTokens: SearchableToken[]
   fileNamePinyinTokens: SearchableToken[]
   chineseSegments: ChineseSegment[]
-  relativePathLower: string
   fileExtLower: string
   hasChineseFileName: boolean
 }
@@ -140,9 +140,7 @@ export function parseSearchQuery(query: string): SearchKeyword[] {
 }
 
 function buildSampleSearchIndex(sample: Sample): SampleSearchIndex {
-  const normalizedPath = sample.filePath.replace(/\\/g, '/')
   const fileNameLower = sample.fileName.toLowerCase()
-  const relativePathLower = normalizedPath.toLowerCase()
   const fileNameTokens = buildSearchableTokens(sample.fileName)
   const fileNamePinyinTokens = fileNameTokens.filter(
     (token) => token.normalizedPinyin.length > 0 && /[a-z]/.test(token.normalizedPinyin),
@@ -155,7 +153,6 @@ function buildSampleSearchIndex(sample: Sample): SampleSearchIndex {
     fileNameTokens,
     fileNamePinyinTokens,
     chineseSegments,
-    relativePathLower,
     fileExtLower: sample.fileExt.toLowerCase(),
     hasChineseFileName: chineseSegments.length > 0,
   }
@@ -295,6 +292,42 @@ function matchChinesePinyinFuzzy(index: SampleSearchIndex, keyword: SearchKeywor
   return null
 }
 
+function matchChinesePinyinPrefix(index: SampleSearchIndex, keyword: SearchKeyword): KeywordMatch | null {
+  if (
+    !index.hasChineseFileName ||
+    !keyword.isPinyinLike ||
+    keyword.normalizedPinyin.length === 0
+  ) {
+    return null
+  }
+
+  let bestMatch: KeywordMatch | null = null
+
+  for (const segment of index.chineseSegments) {
+    for (let offset = 0; offset < segment.normalizedPinyinByChar.length; offset += 1) {
+      const charPinyin = segment.normalizedPinyinByChar[offset]
+      if (!charPinyin.startsWith(keyword.normalizedPinyin)) {
+        continue
+      }
+
+      const position = segment.start + offset
+      const exactBonus = charPinyin === keyword.normalizedPinyin ? 200 : 0
+      const match: KeywordMatch = {
+        matched: true,
+        score: 2600 + exactBonus - position * 8,
+        position,
+        kind: 'chinese-pinyin-prefix',
+      }
+
+      if (!bestMatch || match.score > bestMatch.score) {
+        bestMatch = match
+      }
+    }
+  }
+
+  return bestMatch
+}
+
 function matchFallback(index: SampleSearchIndex, keyword: SearchKeyword): KeywordMatch | null {
   if (!keyword.lower) {
     return null
@@ -306,16 +339,6 @@ function matchFallback(index: SampleSearchIndex, keyword: SearchKeyword): Keywor
       matched: true,
       score: 1800 - fileNamePosition * 4,
       position: fileNamePosition,
-      kind: 'fallback',
-    }
-  }
-
-  const pathPosition = index.relativePathLower.indexOf(keyword.lower)
-  if (pathPosition !== -1) {
-    return {
-      matched: true,
-      score: 900 - pathPosition * 2,
-      position: pathPosition + 1000,
       kind: 'fallback',
     }
   }
@@ -363,6 +386,11 @@ function matchKeyword(index: SampleSearchIndex, keyword: SearchKeyword, options:
     if (bestMatch) {
       return bestMatch
     }
+
+    const chinesePinyinPrefixMatch = matchChinesePinyinPrefix(index, keyword)
+    if (chinesePinyinPrefixMatch) {
+      return chinesePinyinPrefixMatch
+    }
   }
 
   return matchFallback(index, keyword)
@@ -374,12 +402,7 @@ export function matchSampleSearch(
   options: SampleSearchOptions,
 ): SampleSearchMatch | null {
   if (keywords.length === 0) {
-    return {
-      matched: true,
-      score: 0,
-      earliestPosition: Number.MAX_SAFE_INTEGER,
-      kinds: [],
-    }
+    return null
   }
 
   let score = 0

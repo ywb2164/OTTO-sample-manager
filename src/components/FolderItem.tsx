@@ -221,7 +221,7 @@ export const FolderItem: React.FC<Props> = ({
         aria-label={`选择文件夹 ${folder.name}`}
       />
 
-      <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center text-zinc-500">
+      <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center text-zinc-400">
         {isExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
       </div>
 
@@ -242,7 +242,7 @@ export const FolderItem: React.FC<Props> = ({
         />
       ) : (
         <span
-          className={`min-w-0 flex-1 truncate text-sm font-medium ${isHidden ? 'text-zinc-600' : 'text-zinc-100'}`}
+          className={`min-w-0 flex-1 truncate text-sm font-medium ${isHidden ? 'text-zinc-500' : 'text-zinc-100'}`}
           title={folder.path}
         >
           {folder.name}
@@ -250,7 +250,7 @@ export const FolderItem: React.FC<Props> = ({
       )}
 
       {/* 样本计数 */}
-      <span className="flex-shrink-0 text-right text-xs text-zinc-600">
+      <span className="flex-shrink-0 text-right text-xs text-zinc-400">
         {sampleCount} 个样本
       </span>
 

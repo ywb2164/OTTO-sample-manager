@@ -35,6 +35,12 @@ function extractPinyinKeys(fileName: string): string[] {
   )
 }
 
+function getPinyinExactNameKey(fileName: string): string {
+  const lower = fileName.toLowerCase().trim()
+  if (!/^[a-zv]+[1-5]?$/.test(lower)) return ''
+  return normalizePinyinToken(lower)
+}
+
 function sanitizeFileSegment(value: string): string {
   return value.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'sample'
 }
@@ -49,11 +55,13 @@ function createOrderedFileName(index: number, total: number, char: string, pinyi
 
 export function buildLyricsSourceSampleIndex(sourceSamples: Sample[]): LyricsSourceSampleIndex {
   const byChar = new Map<string, Sample[]>()
+  const byPinyinExactName = new Map<string, Sample[]>()
   const byPinyin = new Map<string, Sample[]>()
   const byPinyinNormalized = new Map<string, Sample[]>()
 
   for (const sample of sourceSamples) {
     extractCharKeys(sample.fileName).forEach((charKey) => addToIndex(byChar, charKey, sample))
+    addToIndex(byPinyinExactName, getPinyinExactNameKey(sample.fileName), sample)
     extractPinyinKeys(sample.fileName).forEach((pinyinKey) => {
       addToIndex(byPinyin, pinyinKey, sample)
 
@@ -62,7 +70,7 @@ export function buildLyricsSourceSampleIndex(sourceSamples: Sample[]): LyricsSou
     })
   }
 
-  return { byChar, byPinyin, byPinyinNormalized }
+  return { byChar, byPinyinExactName, byPinyin, byPinyinNormalized }
 }
 
 export function planLyricsAssembly(tokens: LyricToken[], sourceIndex: LyricsSourceSampleIndex): LyricsAssemblyPlan {
@@ -72,12 +80,15 @@ export function planLyricsAssembly(tokens: LyricToken[], sourceIndex: LyricsSour
 
   charTokens.forEach((token, charIndex) => {
     const index = charIndex + 1
-    const byChar = sourceIndex.byChar.get(token.char)?.[0]
     const normalizedPinyin = normalizePinyinToken(token.pinyin)
-    const byPinyinNormalized = normalizedPinyin
+    const byPinyinExactName = normalizedPinyin
+      ? sourceIndex.byPinyinExactName.get(normalizedPinyin)?.[0]
+      : undefined
+    const byPinyinToken = normalizedPinyin
       ? sourceIndex.byPinyinNormalized.get(normalizedPinyin)?.[0]
       : undefined
-    const sample = byChar ?? byPinyinNormalized
+    const byChar = sourceIndex.byChar.get(token.char)?.[0]
+    const sample = byPinyinExactName ?? byPinyinToken ?? byChar
 
     if (!sample) {
       missing.push({
@@ -94,7 +105,7 @@ export function planLyricsAssembly(tokens: LyricToken[], sourceIndex: LyricsSour
       token,
       sample,
       targetFileName: createOrderedFileName(index, charTokens.length, token.char, token.pinyin, sample.fileExt),
-      matchedBy: byChar ? 'char' : 'pinyin-normalized',
+      matchedBy: byPinyinExactName ? 'pinyin-exact-name' : byPinyinToken ? 'pinyin-token' : 'char',
     })
   })
 

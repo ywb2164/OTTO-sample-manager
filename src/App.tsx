@@ -87,6 +87,9 @@ const SelectionBar = React.lazy(() =>
 export default function App() {
   const listRef = React.useRef<HTMLDivElement>(null)
   const selectAllRef = React.useRef<HTMLInputElement>(null)
+  const groupScrollPositionsRef = React.useRef<Map<string, number>>(new Map())
+  const previousGroupScrollKeyRef = React.useRef('__all__')
+  const previousSearchQueryRef = React.useRef('')
   
   const {
     samples, selectedIds,
@@ -101,9 +104,11 @@ export default function App() {
   const { play, stopPlayback, togglePause, seekTo, getWaveform, beginShutdown } = useAudioEngine()
   const folderSettings = useSampleStore(state => state.folderSettings)
   const groups = useSampleStore(state => state.groups)
+  const groupOrder = useSampleStore(state => state.groupOrder)
   const isImporting = useSampleStore(state => state.isImporting)
   const searchQuery = useSampleStore(state => state.searchQuery)
   const activeGroupId = useSampleStore(state => state.activeGroupId)
+  const contextMenuTarget = useSampleStore(state => state.contextMenuTarget)
 
   const [currentWaveform, setCurrentWaveform] = useState<Float32Array | null>(null)
   const [hasHydratedStore, setHasHydratedStore] = useState(false)
@@ -158,9 +163,32 @@ export default function App() {
   })
 
   useEffect(() => {
-    listRef.current?.scrollTo({ top: 0 })
+    const previousGroupKey = previousGroupScrollKeyRef.current
+    const currentGroupKey = activeGroupId ?? '__all__'
+    const previousSearchQuery = previousSearchQueryRef.current.trim()
+    const currentSearchQuery = searchQuery.trim()
+    const listElement = listRef.current
+
+    if (listElement && previousSearchQuery === '') {
+      groupScrollPositionsRef.current.set(previousGroupKey, listElement.scrollTop)
+    }
+
     virtualizer.measure()
-  }, [listResetKey])
+    const nextScrollTop = currentSearchQuery
+      ? 0
+      : groupScrollPositionsRef.current.get(currentGroupKey) ?? 0
+
+    const frameId = window.requestAnimationFrame(() => {
+      listRef.current?.scrollTo({ top: nextScrollTop })
+    })
+
+    previousGroupScrollKeyRef.current = currentGroupKey
+    previousSearchQueryRef.current = searchQuery
+
+    return () => {
+      window.cancelAnimationFrame(frameId)
+    }
+  }, [activeGroupId, listResetKey, searchQuery])
 
   useEffect(() => {
     if (selectAllRef.current) {
@@ -174,6 +202,7 @@ export default function App() {
       const storedFolderState = await window.electronAPI.storeGet('folderState') as StoredFolderState | null
       const storedSettings = await window.electronAPI.storeGet('folderSettings') as any
       const storedGroups = await window.electronAPI.storeGet('groups') as Record<string, any> | null
+      const storedGroupOrder = await window.electronAPI.storeGet('groupOrder') as string[] | null
 
       if (storedSettings) {
         const {
@@ -197,12 +226,13 @@ export default function App() {
       }
 
       if (storedGroups) {
-        const { addGroup, groups } = useSampleStore.getState()
+        const { addGroup, groups, restoreGroupOrder } = useSampleStore.getState()
         if (groups.size === 0) {
           Object.values(storedGroups).forEach((group: any) => {
             addGroup(group)
           })
         }
+        restoreGroupOrder(storedGroupOrder, useSampleStore.getState().groups)
       }
 
       if (!storedSamples) {
@@ -317,6 +347,16 @@ export default function App() {
       console.error('保存 groups 失败', error)
     })
   }, [groups, hasHydratedStore])
+
+  useEffect(() => {
+    if (!hasHydratedStore) {
+      return
+    }
+
+    window.electronAPI.storeSet('groupOrder', groupOrder).catch((error) => {
+      console.error('保存 groupOrder 失败', error)
+    })
+  }, [groupOrder, hasHydratedStore])
 
   useEffect(() => {
     if (!hasHydratedStore) {
@@ -810,7 +850,7 @@ export default function App() {
 
       {samples.size > 0 && (
         <div className="border-b border-white/5 bg-zinc-950 px-3 py-2">
-          <label className="flex w-fit cursor-pointer items-center gap-2 rounded-md border border-white/5 bg-transparent px-2.5 py-1.5 text-xs text-zinc-500 transition-colors hover:bg-white/[0.035] hover:text-zinc-200">
+          <label className="flex w-fit cursor-pointer items-center gap-2 rounded-md border border-white/5 bg-transparent px-2.5 py-1.5 text-xs text-zinc-300 transition-colors hover:bg-white/[0.035] hover:text-zinc-100">
             <input
               ref={selectAllRef}
               type="checkbox"
@@ -825,7 +865,7 @@ export default function App() {
 
       {/* 采样列表（虚拟滚动） */}
       <div className="relative flex-1 overflow-hidden bg-zinc-950">
-      {selectedIds.size > 0 && (
+      {selectedIds.size > 1 && !contextMenuTarget && (
         <Suspense fallback={null}>
           <SelectionBar />
         </Suspense>
@@ -836,11 +876,11 @@ export default function App() {
         style={{ contain: 'strict' }}
       >
         {flattenedItems.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-zinc-600">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-white/5 bg-white/[0.025] text-zinc-500">
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-zinc-400">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-white/5 bg-white/[0.025] text-zinc-400">
               <Music2 size={24} />
             </div>
-            <div className="text-sm text-zinc-500">
+            <div className="text-sm text-zinc-300">
               {samples.size === 0
                 ? '拖入音频文件或点击导入按钮'
                 : '没有匹配的采样'}

@@ -1,11 +1,12 @@
 {
   "name": "sample-manager",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "鬼畜采样管理工具",
   "license": "MIT",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
+    "test": "vitest run",
     "build": "electron-vite build",
     "pack": "npm run build && electron-builder --win --x64",
     "preview": "electron-vite preview"
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^2.0.0",
+    "@testing-library/react": "^15.0.7",
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",
     "@vitejs/plugin-react": "^4.2.1",
@@ -27,9 +29,11 @@
     "electron": "28.2.0",
     "electron-builder": "^24.9.1",
     "electron-vite": "^2.0.0",
+    "jsdom": "^24.1.1",
     "postcss": "^8.4.35",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.3.3",
-    "vite": "^5.0.12"
+    "vite": "^5.0.12",
+    "vitest": "^1.6.1"
   }
 }

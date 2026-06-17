@@ -16,7 +16,7 @@ const WaveformDisplay = React.lazy(() =>
 )
 
 const WaveformPlaceholder: React.FC = () => (
-  <div className="flex h-full w-full items-center justify-center bg-transparent text-xs text-zinc-600">
+  <div className="flex h-full w-full items-center justify-center bg-transparent text-xs text-zinc-400">
     <div className="flex items-center gap-2">
       <AudioWaveform size={16} />
       <span>无波形数据</span>
@@ -132,18 +132,18 @@ export const StatusBar: React.FC<Props> = ({ waveformData, onSeek, onPrimaryActi
             <span className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-100">
               {displaySample.fileName}{displaySample.fileExt}
             </span>
-            <span className="shrink-0 text-[11px] text-zinc-600">
+            <span className="shrink-0 text-[11px] text-zinc-400">
               {sampleRateLabel}
             </span>
-            <span className="shrink-0 text-[11px] text-zinc-600">
+            <span className="shrink-0 text-[11px] text-zinc-400">
               {channelLabel}
             </span>
-            <span className="hidden shrink-0 font-mono text-[11px] text-zinc-600 min-[440px]:inline">
+            <span className="hidden shrink-0 font-mono text-[11px] text-zinc-400 min-[440px]:inline">
               {(displaySample.fileSize / 1024).toFixed(1)}KB
             </span>
           </>
         ) : (
-          <span className="text-xs text-zinc-600">未选择采样</span>
+          <span className="text-xs text-zinc-400">未选择采样</span>
         )}
       </div>
 
@@ -168,7 +168,7 @@ export const StatusBar: React.FC<Props> = ({ waveformData, onSeek, onPrimaryActi
             transition-colors
             ${canControl
               ? 'bg-blue-600 text-white shadow-sm shadow-blue-950/40 hover:bg-blue-500'
-              : 'cursor-not-allowed bg-white/5 text-zinc-600'}
+              : 'cursor-not-allowed bg-white/5 text-zinc-400'}
           `}
           onClick={onPrimaryAction}
           disabled={!canControl}
@@ -177,7 +177,7 @@ export const StatusBar: React.FC<Props> = ({ waveformData, onSeek, onPrimaryActi
           {isPrimaryPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
         </button>
 
-        <span className="w-[104px] flex-shrink-0 font-mono text-[11px] text-zinc-500">
+        <span className="w-[104px] flex-shrink-0 font-mono text-[11px] text-zinc-300">
           {formatTime(displayedCurrentTime)}
           <span className="text-text-dim opacity-50"> / </span>
           {formatTime(duration)}

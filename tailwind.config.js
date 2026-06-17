@@ -30,8 +30,8 @@ export default {
         text: {
           primary: '#f4f4f5',
           secondary: '#a1a1aa',
-          muted: '#71717a',
-          dim: '#52525b',
+          muted: '#a1a1aa',
+          dim: '#71717a',
         },
         border: {
           DEFAULT: 'rgb(255 255 255 / 0.07)',

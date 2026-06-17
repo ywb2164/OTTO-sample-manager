@@ -114,7 +114,7 @@ export const WaveformDisplay: React.FC<Props> = ({ waveformData, duration, onSee
 
     // 绘制"无波形数据"提示
     if (waveformData.length === 0) {
-      ctx.fillStyle = '#52525b'
+      ctx.fillStyle = '#a1a1aa'
       ctx.font = '12px sans-serif'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
@@ -139,7 +139,7 @@ export const WaveformDisplay: React.FC<Props> = ({ waveformData, duration, onSee
 
   if (!waveformData || waveformData.length === 0) {
     return (
-      <div ref={containerRef} className="flex h-full w-full items-center justify-center bg-transparent text-xs text-zinc-600">
+      <div ref={containerRef} className="flex h-full w-full items-center justify-center bg-transparent text-xs text-zinc-400">
         无波形数据
       </div>
     )

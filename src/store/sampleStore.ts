@@ -47,6 +47,27 @@ function collectFolderSampleIds(folderId: string, folders: Map<string, SampleFol
   return sampleIds
 }
 
+function reconcileGroupOrder(groupOrder: string[] | null | undefined, groups: Map<string, SampleGroup>): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+
+  for (const groupId of groupOrder ?? []) {
+    if (groups.has(groupId) && !seen.has(groupId)) {
+      seen.add(groupId)
+      result.push(groupId)
+    }
+  }
+
+  for (const groupId of groups.keys()) {
+    if (!seen.has(groupId)) {
+      seen.add(groupId)
+      result.push(groupId)
+    }
+  }
+
+  return result
+}
+
 function getAncestorFolderIds(folderId: string, folders: Map<string, SampleFolder>): string[] {
   const ancestors: string[] = []
   let current = folders.get(folderId)
@@ -414,6 +435,7 @@ function getFlattenedItemsCached(state: Pick<SampleStore,
 interface SampleStore {
   samples: Map<string, Sample>
   groups: Map<string, SampleGroup>
+  groupOrder: string[]
   searchQuery: string
   activeGroupId: string | null
   selectedIds: Set<string>
@@ -451,6 +473,8 @@ interface SampleStore {
   addGroup: (group: SampleGroup) => void
   removeGroup: (id: string) => void
   renameGroup: (id: string, name: string) => void
+  moveGroup: (draggedGroupId: string, targetGroupId: string) => void
+  restoreGroupOrder: (groupOrder: string[] | null | undefined, groups?: Map<string, SampleGroup>) => void
   addToGroup: (sampleIds: string[], groupId: string) => void
   removeFromGroup: (sampleIds: string[], groupId: string) => void
 
@@ -499,6 +523,7 @@ interface SampleStore {
 export const useSampleStore = create<SampleStore>((set, get) => ({
   samples: new Map(),
   groups: new Map(),
+  groupOrder: [],
   searchQuery: '',
   activeGroupId: null,
   selectedIds: new Set(),
@@ -610,6 +635,7 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
   removeAllImported: () => set(() => ({
     samples: new Map(),
     groups: new Map(),
+    groupOrder: [],
     selectedIds: new Set(),
     anchorId: null,
     folders: new Map(),
@@ -667,7 +693,8 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
   addGroup: (group) => set((state) => {
     const groups = new Map(state.groups)
     groups.set(group.id, group)
-    return { groups, lastGroupChangeTimestamp: Date.now() }
+    const groupOrder = reconcileGroupOrder(state.groupOrder, groups)
+    return { groups, groupOrder, lastGroupChangeTimestamp: Date.now() }
   }),
 
   removeGroup: (id) => set((state) => {
@@ -684,7 +711,8 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
       }
     }
 
-    return { groups, samples, lastGroupChangeTimestamp: Date.now() }
+    const groupOrder = reconcileGroupOrder(state.groupOrder.filter((groupId) => groupId !== id), groups)
+    return { groups, groupOrder, samples, lastGroupChangeTimestamp: Date.now() }
   }),
 
   renameGroup: (id, name) => set((state) => {
@@ -693,6 +721,24 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     if (group) groups.set(id, { ...group, name })
     return { groups, lastGroupChangeTimestamp: Date.now() }
   }),
+
+  moveGroup: (draggedGroupId, targetGroupId) => set((state) => {
+    if (draggedGroupId === targetGroupId) return {}
+    const groupOrder = reconcileGroupOrder(state.groupOrder, state.groups)
+    const fromIndex = groupOrder.indexOf(draggedGroupId)
+    const toIndex = groupOrder.indexOf(targetGroupId)
+    if (fromIndex === -1 || toIndex === -1) return {}
+
+    const [draggedId] = groupOrder.splice(fromIndex, 1)
+    const nextTargetIndex = groupOrder.indexOf(targetGroupId)
+    groupOrder.splice(nextTargetIndex, 0, draggedId)
+
+    return { groupOrder, lastGroupChangeTimestamp: Date.now() }
+  }),
+
+  restoreGroupOrder: (groupOrder, providedGroups) => set((state) => ({
+    groupOrder: reconcileGroupOrder(groupOrder, providedGroups ?? state.groups),
+  })),
 
   addToGroup: (sampleIds, groupId) => set((state) => {
     const samples = new Map(state.samples)
@@ -748,10 +794,13 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     let preSearchExpandedFolderIds = state.preSearchExpandedFolderIds
     let expandedFolderIds = new Set(state.expandedFolderIds)
 
-    if (wasEmpty && !isEmpty) {
-      preSearchExpandedFolderIds = new Set(state.expandedFolderIds)
+    if (!isEmpty) {
+      if (wasEmpty) {
+        preSearchExpandedFolderIds = new Set(state.expandedFolderIds)
+      }
 
       if (state.folderSettings.expandOnSearch) {
+        expandedFolderIds = new Set(preSearchExpandedFolderIds ?? state.expandedFolderIds)
         const keywords = parseSearchQuery(searchQuery)
         const searchIndexMap = getSampleSearchIndexMap(state.samples)
         const matchingFolderIds = new Set<string>()
@@ -963,7 +1012,6 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
 
   openContextMenu: (type, id, x, y) => set({
     contextMenuTarget: { type, id, x, y },
-    showSelectionBar: true,
   }),
 
   closeContextMenu: () => set({ contextMenuTarget: null }),

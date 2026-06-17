@@ -119,18 +119,18 @@ export const SampleItem: React.FC<Props> = ({
       <div className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md transition-colors ${
         isPlaying
           ? 'text-blue-300'
-          : 'text-zinc-500 opacity-0 group-hover:opacity-100'
+          : 'text-zinc-400 opacity-0 group-hover:opacity-100'
       }`}>
         <Play size={13} fill="currentColor" />
       </div>
 
       {/* 文件名 */}
       <span
-        className={`min-w-0 flex-1 truncate text-sm ${isHidden ? 'text-zinc-600' : 'text-zinc-100'}`}
+        className={`min-w-0 flex-1 truncate text-sm ${isHidden ? 'text-zinc-500' : 'text-zinc-100'}`}
         title={sample.filePath}  // hover显示完整路径
       >
         <span className="font-medium">{sample.fileName}</span>
-        <span className="ml-0.5 text-xs text-zinc-600">{sample.fileExt}</span>
+        <span className="ml-0.5 text-xs text-zinc-400">{sample.fileExt}</span>
       </span>
 
       {/* 分组标签 */}
@@ -138,7 +138,7 @@ export const SampleItem: React.FC<Props> = ({
         {groupNames.slice(0, 2).map(name => (
           <span
             key={name}
-            className="truncate rounded border border-white/10 bg-transparent px-1.5 py-0.5 text-[11px] text-zinc-500"
+            className="truncate rounded border border-white/10 bg-transparent px-1.5 py-0.5 text-[11px] text-zinc-300"
           >
             {name}
           </span>
@@ -146,7 +146,7 @@ export const SampleItem: React.FC<Props> = ({
       </div>
 
       {/* 时长 */}
-      <span className="w-16 flex-shrink-0 text-right font-mono text-xs text-zinc-600">
+      <span className="w-16 flex-shrink-0 text-right font-mono text-xs text-zinc-400">
         {formatDuration(sample.duration)}
       </span>
 

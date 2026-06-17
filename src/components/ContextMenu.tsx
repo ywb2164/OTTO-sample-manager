@@ -13,6 +13,7 @@ export const ContextMenu: React.FC = () => {
   const addToGroup = useSampleStore(s => s.addToGroup)
   const removeFromGroup = useSampleStore(s => s.removeFromGroup)
   const samples = useSampleStore(s => s.samples)
+  const getFolderSampleIds = useSampleStore(s => s.getFolderSampleIds)
 
   const [showGroupSubmenu, setShowGroupSubmenu] = useState(false)
 
@@ -41,9 +42,9 @@ export const ContextMenu: React.FC = () => {
     setShowGroupSubmenu(false)
   }, [contextMenuTarget])
 
-  if (!contextMenuTarget) return null
-
   const handleHide = useCallback(() => {
+    if (!contextMenuTarget) return
+
     if (contextMenuTarget.type === 'sample') {
       toggleSampleHidden(contextMenuTarget.id)
     } else {
@@ -53,6 +54,8 @@ export const ContextMenu: React.FC = () => {
   }, [contextMenuTarget, toggleSampleHidden, toggleFolderHidden, closeContextMenu])
 
   const handleRemove = useCallback(() => {
+    if (!contextMenuTarget) return
+
     // 二次确认
     const confirmed = window.confirm(
       contextMenuTarget.type === 'sample'
@@ -74,33 +77,47 @@ export const ContextMenu: React.FC = () => {
   }, [closeContextMenu])
 
   const handleGroupAction = useCallback((groupId: string) => {
-    if (contextMenuTarget.type === 'sample') {
-      const sample = samples.get(contextMenuTarget.id)
-      if (!sample) {
-        setShowGroupSubmenu(false)
-        closeContextMenu()
-        return
-      }
-      const isInGroup = sample.groupIds.includes(groupId)
-      if (isInGroup) {
-        removeFromGroup([contextMenuTarget.id], groupId)
-      } else {
-        addToGroup([contextMenuTarget.id], groupId)
-      }
+    if (!contextMenuTarget) return
+
+    const targetSampleIds = contextMenuTarget.type === 'sample'
+      ? samples.has(contextMenuTarget.id) ? [contextMenuTarget.id] : []
+      : getFolderSampleIds(contextMenuTarget.id)
+
+    if (targetSampleIds.length === 0) {
+      setShowGroupSubmenu(false)
+      closeContextMenu()
+      return
     }
-    // 对于文件夹，暂时不处理
+
+    const allInGroup = targetSampleIds.every((sampleId) =>
+      samples.get(sampleId)?.groupIds.includes(groupId),
+    )
+
+    if (allInGroup) {
+      removeFromGroup(targetSampleIds, groupId)
+    } else {
+      addToGroup(targetSampleIds, groupId)
+    }
+
     setShowGroupSubmenu(false)
     closeContextMenu()
-  }, [contextMenuTarget, samples, addToGroup, removeFromGroup, closeContextMenu])
+  }, [contextMenuTarget, samples, getFolderSampleIds, addToGroup, removeFromGroup, closeContextMenu])
 
   const handleGroupSubmenuToggle = useCallback(() => {
     setShowGroupSubmenu(prev => !prev)
   }, [])
 
   // 计算当前样本的分组信息（仅样本类型）
-  const currentSample = contextMenuTarget.type === 'sample' ? samples.get(contextMenuTarget.id) : null
-  const sampleGroupIds = currentSample?.groupIds || []
+  const targetSampleIds = contextMenuTarget
+    ? contextMenuTarget.type === 'sample'
+      ? samples.has(contextMenuTarget.id) ? [contextMenuTarget.id] : []
+      : getFolderSampleIds(contextMenuTarget.id)
+    : []
+  const groupTargetLabel = contextMenuTarget?.type === 'folder' ? '分配文件夹到分组' : '分配到分组'
+  const groupTargetSampleCount = targetSampleIds.length
   const groupList = Array.from(groups.values())
+
+  if (!contextMenuTarget) return null
 
   return (
     <div
@@ -126,15 +143,15 @@ export const ContextMenu: React.FC = () => {
         <span>移除</span>
       </button>
 
-      {/* 分配到分组（仅样本） */}
-      {contextMenuTarget.type === 'sample' && (
+      {/* 分配到分组 */}
+      {(contextMenuTarget.type === 'sample' || groupTargetSampleCount > 0) && (
         <div className="relative">
           <button
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-text-primary transition-colors hover:bg-bg-hover"
             onClick={handleGroupSubmenuToggle}
           >
             <Layers3 size={14} />
-            <span className="flex-1">分配到分组</span>
+            <span className="flex-1">{groupTargetLabel}</span>
             <ChevronRight size={13} className="text-text-muted" />
           </button>
           {showGroupSubmenu && (
@@ -143,7 +160,9 @@ export const ContextMenu: React.FC = () => {
                 <div className="px-3 py-2 text-xs text-text-dim">暂无分组</div>
               ) : (
                 groupList.map(group => {
-                  const isInGroup = sampleGroupIds.includes(group.id)
+                  const isInGroup = targetSampleIds.length > 0 && targetSampleIds.every((sampleId) =>
+                    samples.get(sampleId)?.groupIds.includes(group.id),
+                  )
                   return (
                     <button
                       key={group.id}

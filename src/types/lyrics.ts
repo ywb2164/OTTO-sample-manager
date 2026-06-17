@@ -17,11 +17,12 @@ export interface LyricsMatchedItem {
   token: Extract<LyricToken, { type: 'char' }>
   sample: Sample
   targetFileName: string
-  matchedBy: 'char' | 'pinyin-normalized'
+  matchedBy: 'pinyin-exact-name' | 'pinyin-token' | 'char'
 }
 
 export interface LyricsSourceSampleIndex {
   byChar: Map<string, Sample[]>
+  byPinyinExactName: Map<string, Sample[]>
   byPinyin: Map<string, Sample[]>
   byPinyinNormalized: Map<string, Sample[]>
 }
