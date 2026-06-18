@@ -2,7 +2,13 @@
   "name": "sample-manager",
   "version": "2.4.0",
   "description": "鬼畜采样管理工具",
+  "author": "ywb2164",
   "license": "MIT",
+  "homepage": "https://github.com/ywb2164/OTTO-sample-manager#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ywb2164/OTTO-sample-manager.git"
+  },
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",

@@ -1,10 +1,11 @@
-appId: com.electron.app
+appId: com.ywb2164.otto-sample-manager
 productName: 采样管理器
-copyright: Copyright © 2024
+copyright: Copyright © 2026 ywb2164
 directories:
   buildResources: resources
   output: ../sample-manager-release
 asar: true
+compression: normal
 files:
   - out/**/*
   - package.json
@@ -36,9 +37,6 @@ win:
   icon: icon.ico
   target:
     - target: nsis
-      arch:
-        - x64
-    - target: portable
       arch:
         - x64
 nsis:
