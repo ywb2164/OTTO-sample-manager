@@ -1,8 +1,12 @@
 export {}
 
-interface ElectronCheckForUpdatesOptions {
-  silentIfNoUpdate?: boolean
-  showErrors?: boolean
+interface ElectronUpdateState {
+  phase: 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'unsupported' | 'error'
+  currentVersion: string
+  availableVersion: string | null
+  progressPercent: number | null
+  message: string | null
+  action: 'none' | 'download-and-restart' | 'open-portable-download'
 }
 
 interface ElectronScannedFolderNode {
@@ -49,7 +53,10 @@ declare global {
         failed: Array<{ id: string; sourcePath: string; reason: string }>
         targetDir: string | null
       }>
-      checkForUpdates: (options?: ElectronCheckForUpdatesOptions) => Promise<void>
+      getUpdateState: () => Promise<ElectronUpdateState>
+      checkForUpdates: (options?: { manual?: boolean }) => Promise<ElectronUpdateState>
+      startUpdate: () => Promise<void>
+      onUpdateState: (listener: (state: ElectronUpdateState) => void) => () => void
     }
   }
 }

@@ -76,7 +76,10 @@ appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
 publish:
-  provider: generic
-  url: https://example.com/auto-updates
+  provider: github
+  owner: ywb2164
+  repo: OTTO-sample-manager
+  releaseType: release
+electronUpdaterCompatibility: ">=2.16"
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/

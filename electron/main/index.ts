@@ -2,8 +2,9 @@ import { app, BrowserWindow, ipcMain, dialog, nativeImage, screen, shell } from 
 import { join } from 'path'
 import { copyFileSync, existsSync, mkdirSync, statSync } from 'fs'
 import Store from 'electron-store'
+import { autoUpdater } from 'electron-updater'
 import { cleanupManagedCopiesSync, createManagedCopySync, getLyricsAssembliesDir } from './copyManager'
-import { GitHubReleaseUpdateService } from './services/updateService'
+import { UpdateService } from './services/updateService'
 import { scanAudioFolder } from './folderScanner'
 import { calculatePrimarySidebarBounds } from './windowPlacement'
 
@@ -37,14 +38,30 @@ const store = new Store({
 })
 
 let mainWindow: BrowserWindow | null = null
-const GITHUB_LATEST_RELEASE_API_URL =
-  'https://api.github.com/repos/ywb2164/OTTO-sample-manager/releases/latest'
+const PORTABLE_RELEASE_URL =
+  'https://github.com/ywb2164/OTTO-sample-manager/releases/latest'
 const FALLBACK_DRAG_ICON_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn7L6kAAAAASUVORK5CYII='
 
-const updateService = new GitHubReleaseUpdateService({
-  apiUrl: GITHUB_LATEST_RELEASE_API_URL,
-  getWindow: () => mainWindow,
+const isPortableBuild = Boolean(process.env.PORTABLE_EXECUTABLE_FILE || process.env.PORTABLE_EXECUTABLE_DIR)
+
+if (process.env.OTTO_UPDATE_FEED_URL) {
+  autoUpdater.setFeedURL({
+    provider: 'generic',
+    url: process.env.OTTO_UPDATE_FEED_URL,
+  })
+}
+
+const updateService = new UpdateService({
+  updater: autoUpdater,
+  currentVersion: app.getVersion(),
+  portable: isPortableBuild,
+  openPortableDownload: async () => {
+    await shell.openExternal(PORTABLE_RELEASE_URL)
+  },
+  onStateChange: (state) => {
+    mainWindow?.webContents.send('update-state', state)
+  },
 })
 
 function createFallbackDragIcon() {
@@ -157,10 +174,9 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   createWindow()
-  void updateService.checkForUpdates({
-    silentIfNoUpdate: true,
-    showErrors: false,
-  })
+  if (app.isPackaged || process.env.OTTO_UPDATE_FEED_URL) {
+    void updateService.checkForUpdates()
+  }
   
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -291,12 +307,9 @@ ipcMain.on('open-external-link', (_, url: string) => {
   shell.openExternal(url)
 })
 
-ipcMain.handle('app-check-for-updates', async (_, options?: {
-  silentIfNoUpdate?: boolean
-  showErrors?: boolean
-}) => {
-  await updateService.checkForUpdates(options)
-})
+ipcMain.handle('update-get-state', () => updateService.getState())
+ipcMain.handle('update-check', async (_, options?: { manual?: boolean }) => updateService.checkForUpdates(options))
+ipcMain.handle('update-start', async () => updateService.startUpdate())
 
 // ------------------------------
 // 原生文件拖拽（核心功能）

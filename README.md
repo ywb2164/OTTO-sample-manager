@@ -254,7 +254,7 @@ npm run pack
 
 ## 更新检查
 
-应用支持两种更新检查方式：
+Windows NSIS 安装版支持两种更新检查方式：
 
 - 启动时自动联网检查更新
 - 在顶部右侧 `⚙` 设置菜单中手动点击 `检查更新`
@@ -262,37 +262,19 @@ npm run pack
 设置菜单中会显示：
 
 - `当前版本：x.x.x`
-- `检查更新` 按钮
+- `检查更新`、`下载并自动重启`与下载进度
 
 手动检查会有明确反馈：
 
-- 有新版本：弹出更新说明，并可直接跳转下载页
-- 没有新版本：提示当前已是最新版本
-- 检查失败：提示稍后重试
+- 有新版本：用户点击 `下载并自动重启` 后，下载完成立即静默安装并重启
+- 没有新版本：设置内显示当前已是最新版本
+- 检查失败：设置内显示错误摘要，并可重试
+- 便携版：不会替换运行中的 EXE，只会打开 Release 下载页
 
-### 更新来源
+### 更新来源与安全说明
 
-主进程默认使用：
+构建通过 `electron-builder` 的 GitHub provider 发布 NSIS setup、portable、`latest.yml` 与 blockmap。更新器会校验 GitHub 发布元数据中的 SHA-512。
 
-```txt
-https://api.github.com/repos/ywb2164/OTTO-sample-manager/releases/latest
-```
+2.5.0 是应用内更新的基线，仍需要手动安装一次；从 2.5.1 开始，安装版才能在应用内完成更新。
 
-读取字段：
-
-- `tag_name`：最新版本号，支持 `v2.2.2` 或 `2.2.2`
-- `body`：更新说明，弹窗展示前会做基础纯文本整理
-- `assets`：优先匹配 Windows 安装包
-- `html_url`：如果没找到合适安装包，则回退到 release 页面
-
-Windows 安装包匹配规则：
-
-- 文件名包含 `sample-manager`
-- 文件名包含 `setup`
-- 文件名以 `.exe` 结尾
-
-下载链接优先使用 GitHub Release 资产直链，例如：
-
-```txt
-https://github.com/ywb2164/OTTO-sample-manager/releases/download/v2.2.1/sample-manager-2.2.1-setup.exe
-```
+当前尚未配置 Windows Authenticode 签名：哈希校验能发现内容与 metadata 不一致，但不等同于验证发布者身份。取得 PFX 或 Azure Trusted Signing 后，应在 CI Secrets 配置 `WIN_CSC_LINK` 和 `WIN_CSC_KEY_PASSWORD`，再启用强制签名。

@@ -26,6 +26,7 @@ import type {
   ScannedFolderNode,
   StoredFolderState,
   StoredImportUndoState,
+  UpdateState,
 } from '@/types'
 import { reconcileLibraryState } from '@/services/libraryImport'
 import { buildLyricsSourceSampleIndex, planLyricsAssembly } from '@/services/lyricsSampleAssembler'
@@ -126,6 +127,14 @@ export default function App() {
 
   const [currentWaveform, setCurrentWaveform] = useState<Float32Array | null>(null)
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null)
+  const [updateState, setUpdateState] = useState<UpdateState>({
+    phase: 'idle',
+    currentVersion: '',
+    availableVersion: null,
+    progressPercent: null,
+    message: null,
+    action: 'none',
+  })
   const [hasHydratedStore, setHasHydratedStore] = useState(false)
   const [showLyricsAssembler, setShowLyricsAssembler] = useState(false)
   const [lyricsFilePath, setLyricsFilePath] = useState('')
@@ -139,6 +148,13 @@ export default function App() {
     failedCopies: number
   } | null>(null)
   const closeImportSummary = useCallback(() => setImportSummary(null), [])
+  const isUpdateBlocking = updateState.phase === 'downloading' || updateState.phase === 'installing'
+  const handleCheckForUpdates = useCallback(() => {
+    void window.electronAPI.checkForUpdates({ manual: true }).then(setUpdateState).catch(() => undefined)
+  }, [])
+  const handleStartUpdate = useCallback(() => {
+    void window.electronAPI.startUpdate().catch(() => undefined)
+  }, [])
   const handleListContextMenu = useCallback((event: React.MouseEvent) => {
     event.preventDefault()
     useSampleStore.getState().openContextMenu('background', '', event.clientX, event.clientY)
@@ -313,6 +329,22 @@ export default function App() {
   }, [setDecodeProgress])
 
   useEffect(() => {
+    let disposed = false
+    window.electronAPI.getUpdateState()
+      .then((state) => {
+        if (!disposed) setUpdateState(state)
+      })
+      .catch(() => undefined)
+    const unsubscribe = window.electronAPI.onUpdateState((state) => {
+      if (!disposed) setUpdateState(state)
+    })
+    return () => {
+      disposed = true
+      unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
     const handleShutdown = () => {
       beginShutdown()
       setDecodeProgress(null)
@@ -437,7 +469,7 @@ export default function App() {
     lockAlreadyHeld?: boolean
   }) => {
     if (!lockAlreadyHeld) {
-      if (useSampleStore.getState().isImporting) return
+      if (isUpdateBlocking || useSampleStore.getState().isImporting) return
       useSampleStore.getState().setIsImporting(true)
     }
 
@@ -518,10 +550,10 @@ export default function App() {
         useSampleStore.getState().setIsImporting(false)
       }
     }
-  }, [commitImport, setDecodeProgress])
+  }, [commitImport, isUpdateBlocking, setDecodeProgress])
 
   const handleImportFiles = useCallback(async () => {
-    if (useSampleStore.getState().isImporting) return
+    if (isUpdateBlocking || useSampleStore.getState().isImporting) return
     useSampleStore.getState().setIsImporting(true)
 
     try {
@@ -550,10 +582,10 @@ export default function App() {
     } finally {
       useSampleStore.getState().setIsImporting(false)
     }
-  }, [runImport])
+  }, [isUpdateBlocking, runImport])
 
   const handleImportFolder = useCallback(async () => {
-    if (useSampleStore.getState().isImporting) return
+    if (isUpdateBlocking || useSampleStore.getState().isImporting) return
     useSampleStore.getState().setIsImporting(true)
     let selectedFolder: string | null = null
 
@@ -604,9 +636,10 @@ export default function App() {
     } finally {
       useSampleStore.getState().setIsImporting(false)
     }
-  }, [runImport])
+  }, [isUpdateBlocking, runImport])
 
   const handleRemoveAllImported = useCallback(() => {
+    if (isUpdateBlocking) return
     const confirmed = window.confirm('确定移除当前导入的全部文件夹和素材吗？\n这不会删除磁盘上的原始文件。')
     if (!confirmed) return
 
@@ -623,7 +656,7 @@ export default function App() {
     window.electronAPI.storeDelete('folderState').catch((error) => {
       console.error('删除 folderState 失败', error)
     })
-  }, [removeAllImported, stopPlayback])
+  }, [isUpdateBlocking, removeAllImported, stopPlayback])
 
   const resetLyricsAssemblerState = useCallback(() => {
     setLyricsFilePath('')
@@ -659,7 +692,7 @@ export default function App() {
   }, [])
 
   const handleAssembleLyrics = useCallback(async () => {
-    if (!lyricsFilePath || !lyricsSourceGroupId || !lyricsTargetGroupName.trim() || isAssemblingLyrics) {
+    if (!lyricsFilePath || !lyricsSourceGroupId || !lyricsTargetGroupName.trim() || isAssemblingLyrics || isUpdateBlocking) {
       return
     }
 
@@ -771,12 +804,12 @@ export default function App() {
     } finally {
       setIsAssemblingLyrics(false)
     }
-  }, [addGroup, addSamples, groups, isAssemblingLyrics, lyricsFilePath, lyricsSourceGroupId, lyricsTargetGroupName, lyricsTokens, resetLyricsAssemblerState, samples, setActiveGroupId])
+  }, [addGroup, addSamples, groups, isAssemblingLyrics, isUpdateBlocking, lyricsFilePath, lyricsSourceGroupId, lyricsTargetGroupName, lyricsTokens, resetLyricsAssemblerState, samples, setActiveGroupId])
 
   // 拖文件到窗口导入
   const handleWindowDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
-    if (useSampleStore.getState().isImporting) return
+    if (isUpdateBlocking || useSampleStore.getState().isImporting) return
     const paths = Array.from(e.dataTransfer.files)
       // @ts-ignore - File in Electron environment has a path property
       .map((f: any) => (f as any).path)
@@ -784,7 +817,7 @@ export default function App() {
     if (paths.length > 0) {
       void runImport({ filePaths: paths, scannedFileCount: paths.length })
     }
-  }, [runImport])
+  }, [isUpdateBlocking, runImport])
 
   // ------------------------------
   // 文件夹操作
@@ -935,7 +968,10 @@ export default function App() {
         onImportFolder={handleImportFolder}
         onAssembleLyrics={handleOpenLyricsAssembler}
         onRemoveAllImported={handleRemoveAllImported}
-        isImporting={isImporting}
+        isImporting={isImporting || isUpdateBlocking}
+        updateState={updateState}
+        onCheckForUpdates={handleCheckForUpdates}
+        onStartUpdate={handleStartUpdate}
       />
 
       {/* 搜索栏 */}
@@ -1182,7 +1218,7 @@ export default function App() {
               <button
                 className="inline-flex h-8 items-center gap-1.5 rounded-md bg-accent-primary px-3 text-xs font-medium text-white transition-colors hover:bg-accent-light disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={handleAssembleLyrics}
-                disabled={isAssemblingLyrics || !lyricsFilePath || !lyricsSourceGroupId || !lyricsTargetGroupName.trim()}
+                disabled={isUpdateBlocking || isAssemblingLyrics || !lyricsFilePath || !lyricsSourceGroupId || !lyricsTargetGroupName.trim()}
               >
                 {isAssemblingLyrics && <Loader2 size={14} className="animate-spin" />}
                 <span>{isAssemblingLyrics ? '生成中...' : '开始生成'}</span>

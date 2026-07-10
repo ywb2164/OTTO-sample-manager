@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { UpdateState } from '../updateTypes'
 
 // 向渲染进程暴露安全的API
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -43,8 +44,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     targetGroupName: string
     items: Array<{ id: string; sourcePath: string; fileName: string }>
   }) => ipcRenderer.invoke('lyrics-create-files', payload),
-  checkForUpdates: (options?: { silentIfNoUpdate?: boolean; showErrors?: boolean }) =>
-    ipcRenderer.invoke('app-check-for-updates', options)
+  getUpdateState: () => ipcRenderer.invoke('update-get-state'),
+  checkForUpdates: (options?: { manual?: boolean }) => ipcRenderer.invoke('update-check', options),
+  startUpdate: () => ipcRenderer.invoke('update-start'),
+  onUpdateState: (listener: (state: unknown) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, state: unknown) => listener(state)
+    ipcRenderer.on('update-state', wrapped)
+    return () => ipcRenderer.removeListener('update-state', wrapped)
+  },
 })
 
 // TypeScript类型声明
@@ -90,10 +97,10 @@ declare global {
         failed: Array<{ id: string; sourcePath: string; reason: string }>
         targetDir: string | null
       }>
-      checkForUpdates: (options?: {
-        silentIfNoUpdate?: boolean
-        showErrors?: boolean
-      }) => Promise<void>
+      getUpdateState: () => Promise<UpdateState>
+      checkForUpdates: (options?: { manual?: boolean }) => Promise<UpdateState>
+      startUpdate: () => Promise<void>
+      onUpdateState: (listener: (state: UpdateState) => void) => () => void
     }
   }
 }
