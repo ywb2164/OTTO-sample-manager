@@ -68,7 +68,11 @@ declare global {
       openFileDialog: () => Promise<string[]>
       openFolderDialog: () => Promise<string | null>
       openLyricsFileDialog: () => Promise<string | null>
-      scanFolder: (folderPath: string) => Promise<ScannedFolderNode | null>
+      scanFolder: (folderPath: string) => Promise<{
+        root: ScannedFolderNode | null
+        scannedFileCount: number
+        failures: Array<{ path: string; stage: 'scan'; reason: string }>
+      }>
       getFileInfo: (filePath: string) => Promise<{ exists: boolean; fileSize: number }>
       validateFiles: (filePaths: string[]) => Promise<{ path: string; valid: boolean }[]>
       showInExplorer: (filePath: string) => void

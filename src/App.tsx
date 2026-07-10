@@ -12,11 +12,21 @@ import { SampleItem } from '@/components/SampleList/SampleItem'
 import { FolderItem } from '@/components/FolderItem'
 import { StatusBar } from '@/components/StatusBar/StatusBar'
 import { ContextMenu } from '@/components/ContextMenu'
+import { ImportResultBanner } from '@/components/ImportResultBanner'
 
 import { useSampleStore } from '@/store/sampleStore'
 import { usePlayerStore } from '@/store/playerStore'
 import { useAudioEngine } from '@/hooks/useAudioEngine'
-import { Sample, SampleFolder, ScannedFolderNode, StoredFolderState } from '@/types'
+import type {
+  ImportCandidate,
+  ImportFailure,
+  ImportSummary,
+  Sample,
+  SampleFolder,
+  ScannedFolderNode,
+  StoredFolderState,
+} from '@/types'
+import { reconcileLibraryState } from '@/services/libraryImport'
 import { buildLyricsSourceSampleIndex, planLyricsAssembly } from '@/services/lyricsSampleAssembler'
 import { decodeLyricsText, getDefaultLyricsGroupName, tokenizeLyricsText } from '@/services/lyricsPinyinService'
 import type { LyricsMissingItem, LyricToken } from '@/types/lyrics'
@@ -93,7 +103,7 @@ export default function App() {
   
   const {
     samples, selectedIds,
-    addSamples, addGroup, importStructuredData, restoreFolders, removeAllImported, setDecodeProgress,
+    addSamples, addGroup, commitImport, removeAllImported, setDecodeProgress,
     toggleSelected, clearSelection, selectAll,
     setAnchorId, setSelected, setActiveGroupId,
     toggleFolderExpanded, renameFolder, removeFolder, moveFolder, getOrderedIds,
@@ -111,6 +121,7 @@ export default function App() {
   const contextMenuTarget = useSampleStore(state => state.contextMenuTarget)
 
   const [currentWaveform, setCurrentWaveform] = useState<Float32Array | null>(null)
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null)
   const [hasHydratedStore, setHasHydratedStore] = useState(false)
   const [showLyricsAssembler, setShowLyricsAssembler] = useState(false)
   const [lyricsFilePath, setLyricsFilePath] = useState('')
@@ -123,6 +134,7 @@ export default function App() {
     missing: LyricsMissingItem[]
     failedCopies: number
   } | null>(null)
+  const closeImportSummary = useCallback(() => setImportSummary(null), [])
 
   const orderedIds = getOrderedIds()
   const selectableCount = orderedIds.length
@@ -225,40 +237,21 @@ export default function App() {
         }
       }
 
-      if (storedGroups) {
-        const { addGroup, groups, restoreGroupOrder } = useSampleStore.getState()
-        if (groups.size === 0) {
-          Object.values(storedGroups).forEach((group: any) => {
-            addGroup(group)
-          })
-        }
-        restoreGroupOrder(storedGroupOrder, useSampleStore.getState().groups)
-      }
-
-      if (!storedSamples) {
-        setHasHydratedStore(true)
-        return
-      }
-
-      const sampleList: Sample[] = Object.values(storedSamples).map(s => ({
+      const sampleList: Sample[] = Object.values(storedSamples ?? {}).map(s => ({
         ...s,
         folderId: s.folderId ?? null,
         originalId: s.originalId ?? s.id,
         isCopy: s.isCopy ?? false,
         copyIndex: s.copyIndex ?? 0,
+        groupIds: Array.isArray(s.groupIds) ? s.groupIds : [],
         isDecoded: false,
         isFileValid: true,  // 先假设有效，后面验证
       }))
 
-      if (sampleList.length === 0) {
-        setHasHydratedStore(true)
-        return
-      }
-
       // 验证文件是否仍然存在
-      const validationResult = await window.electronAPI.validateFiles(
-        sampleList.map(s => s.filePath)
-      )
+      const validationResult = sampleList.length > 0
+        ? await window.electronAPI.validateFiles(sampleList.map(s => s.filePath))
+        : []
       
       const validationMap = new Map<string, boolean>(validationResult.map((r: any) => [r.path, r.valid]))
       const validatedSamples: Sample[] = sampleList.map(s => ({
@@ -266,12 +259,38 @@ export default function App() {
         isFileValid: validationMap.get(s.filePath) ?? false
       }))
 
-      if (storedFolderState?.folders && storedFolderState.folderOrder) {
-        restoreFolders(Object.values(storedFolderState.folders), storedFolderState.folderOrder)
-        addSamples(validatedSamples)
-      } else {
-        addSamples(validatedSamples)
-      }
+      const restoredGroups = new Map(
+        Object.values(storedGroups ?? {}).map((group: any) => [group.id, {
+          ...group,
+          sampleIds: Array.isArray(group.sampleIds) ? group.sampleIds : [],
+        }]),
+      )
+      const restoredFolders = new Map(
+        Object.values(storedFolderState?.folders ?? {}).map((folder: any) => [folder.id, {
+          ...folder,
+          sampleIds: Array.isArray(folder.sampleIds) ? folder.sampleIds : [],
+          childFolderIds: Array.isArray(folder.childFolderIds) ? folder.childFolderIds : [],
+          parentId: folder.parentId ?? null,
+          rootId: folder.rootId ?? folder.id,
+          depth: folder.depth ?? 0,
+          importedAt: folder.importedAt ?? 0,
+        }]),
+      )
+      const reconciled = reconcileLibraryState({
+        samples: new Map(validatedSamples.map((sample) => [sample.id, sample])),
+        groups: restoredGroups,
+        folders: restoredFolders,
+        folderOrder: storedFolderState?.folderOrder ?? [],
+      })
+
+      useSampleStore.setState({
+        samples: reconciled.samples,
+        groups: reconciled.groups,
+        folders: reconciled.folders,
+        folderOrder: reconciled.folderOrder,
+        lastGroupChangeTimestamp: Date.now(),
+      })
+      useSampleStore.getState().restoreGroupOrder(storedGroupOrder, reconciled.groups)
 
       setHasHydratedStore(true)
     }
@@ -281,7 +300,7 @@ export default function App() {
       setDecodeProgress(null)
       useSampleStore.getState().setIsImporting(false)
     })
-  }, [addSamples, restoreFolders, setDecodeProgress])
+  }, [setDecodeProgress])
 
   useEffect(() => {
     const handleShutdown = () => {
@@ -380,102 +399,52 @@ export default function App() {
   // ------------------------------
   // 导入文件
   // ------------------------------
-  const importFiles = useCallback(async (filePaths: string[]) => {
-    if (filePaths.length === 0 || useSampleStore.getState().isImporting) return
-    useSampleStore.getState().setIsImporting(true)
-
-    const newSamples: Sample[] = []
-    const existingFilePaths = new Set(Array.from(useSampleStore.getState().samples.values()).map(sample => sample.filePath))
-    const targetGroupId = useSampleStore.getState().activeGroupId
-
-    try {
-      for (const filePath of filePaths) {
-        if (existingFilePaths.has(filePath)) continue
-
-        try {
-          const fileInfo = await window.electronAPI.getFileInfo(filePath)
-          if (!fileInfo?.exists) continue
-          const { fileName, fileExt } = getFileNameParts(filePath)
-
-          const sampleId = uuidv4()
-
-          const sample: Sample = {
-            id: sampleId,
-            fileName,
-            fileExt,
-            filePath,
-            folderId: null,
-            originalId: sampleId,
-            isCopy: false,
-            copyIndex: 0,
-            duration: 0,
-            sampleRate: 0,
-            channels: 0,
-            fileSize: fileInfo.fileSize,
-            groupIds: targetGroupId ? [targetGroupId] : [],
-            importedAt: Date.now(),
-            isDecoded: false,
-            isFileValid: true,
-          }
-
-          newSamples.push(sample)
-          existingFilePaths.add(filePath)
-        } catch (e) {
-          console.error(`导入失败: ${filePath}`, e)
-        }
-      }
-
-      addSamples(newSamples)
-
-      setDecodeProgress(null)
-    } finally {
-      useSampleStore.getState().setIsImporting(false)
+  const runImport = useCallback(async ({
+    filePaths,
+    importedFolders = [],
+    rootFolderIds = [],
+    scannedFileCount,
+    initialFailures = [],
+    lockAlreadyHeld = false,
+  }: {
+    filePaths: string[]
+    importedFolders?: SampleFolder[]
+    rootFolderIds?: string[]
+    scannedFileCount: number
+    initialFailures?: ImportFailure[]
+    lockAlreadyHeld?: boolean
+  }) => {
+    if (!lockAlreadyHeld) {
+      if (useSampleStore.getState().isImporting) return
+      useSampleStore.getState().setIsImporting(true)
     }
-  }, [addSamples, setDecodeProgress])
 
-  const handleImportFiles = useCallback(async () => {
-    if (useSampleStore.getState().isImporting) return
-    const paths = await window.electronAPI.openFileDialog()
-    await importFiles(paths)
-  }, [importFiles])
-
-  const handleImportFolder = useCallback(async () => {
-    if (useSampleStore.getState().isImporting) return
-    const folder = await window.electronAPI.openFolderDialog()
-    if (!folder) return
-    const scannedRoot = await window.electronAPI.scanFolder(folder)
-    if (!scannedRoot) return
-
-    useSampleStore.getState().setIsImporting(true)
-    const { folders: builtFolders, rootFolderIds } = buildStructuredFolders(scannedRoot)
-    const folderMap = new Map(builtFolders.map(folderItem => [folderItem.path, folderItem]))
-    const existingFilePaths = new Set(Array.from(useSampleStore.getState().samples.values()).map(sample => sample.filePath))
+    const candidates: ImportCandidate[] = []
+    const failures = initialFailures.map((failure) => ({ ...failure }))
     const targetGroupId = useSampleStore.getState().activeGroupId
-    const newSamples: Sample[] = []
-
-    const collectFiles = (node: ScannedFolderNode): string[] => [
-      ...node.files,
-      ...node.children.flatMap(collectFiles),
-    ]
+    const folderMap = new Map(importedFolders.map((folder) => [folder.path, folder]))
 
     try {
-      for (const filePath of collectFiles(scannedRoot)) {
-        if (existingFilePaths.has(filePath)) continue
-
+      for (const [index, filePath] of filePaths.entries()) {
         try {
           const fileInfo = await window.electronAPI.getFileInfo(filePath)
-          if (!fileInfo?.exists) continue
+          if (!fileInfo?.exists) {
+            failures.push({
+              path: filePath,
+              stage: 'metadata',
+              reason: '文件不存在或无法读取',
+            })
+            continue
+          }
           const { fileName, fileExt } = getFileNameParts(filePath)
           const sampleId = uuidv4()
           const folderPath = filePath.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
-          const parentFolder = folderMap.get(folderPath)
-
-          const sample: Sample = {
+          const candidate: ImportCandidate = {
             id: sampleId,
             fileName,
             fileExt,
             filePath,
-            folderId: parentFolder?.id ?? null,
+            folderId: folderMap.get(folderPath)?.id ?? null,
             originalId: sampleId,
             isCopy: false,
             copyIndex: 0,
@@ -483,34 +452,137 @@ export default function App() {
             sampleRate: 0,
             channels: 0,
             fileSize: fileInfo.fileSize,
-            groupIds: targetGroupId ? [targetGroupId] : [],
-            importedAt: Date.now(),
+            importedAt: Date.now() + index,
             isDecoded: false,
             isFileValid: true,
           }
-
-          newSamples.push(sample)
-          if (parentFolder) {
-            parentFolder.sampleIds.push(sampleId)
-          }
-          existingFilePaths.add(filePath)
+          candidates.push(candidate)
         } catch (error) {
-          console.error(`导入失败: ${filePath}`, error)
+          failures.push({
+            path: filePath,
+            stage: 'metadata',
+            reason: error instanceof Error ? error.message : String(error),
+          })
         }
       }
 
-      importStructuredData({
-        samples: newSamples,
-        folders: builtFolders,
+      const summary = commitImport({
+        candidates,
+        folders: importedFolders,
         rootFolderIds,
         targetGroupId,
+        scannedFileCount,
+        failures,
       })
-
+      setImportSummary(summary)
       setDecodeProgress(null)
+    } catch (error) {
+      const commitFailure: ImportFailure = {
+        path: targetGroupId ?? 'library',
+        stage: 'commit',
+        reason: error instanceof Error ? error.message : String(error),
+      }
+      setImportSummary({
+        scanned: scannedFileCount,
+        added: 0,
+        linkedToGroup: 0,
+        skipped: 0,
+        failed: failures.length + 1,
+        targetGroupId,
+        failures: [...failures, commitFailure],
+      })
+    } finally {
+      if (!lockAlreadyHeld) {
+        useSampleStore.getState().setIsImporting(false)
+      }
+    }
+  }, [commitImport, setDecodeProgress])
+
+  const handleImportFiles = useCallback(async () => {
+    if (useSampleStore.getState().isImporting) return
+    useSampleStore.getState().setIsImporting(true)
+
+    try {
+      const paths = await window.electronAPI.openFileDialog()
+      if (paths.length === 0) return
+      await runImport({
+        filePaths: paths,
+        scannedFileCount: paths.length,
+        lockAlreadyHeld: true,
+      })
+    } catch (error) {
+      const failure: ImportFailure = {
+        path: '文件选择',
+        stage: 'scan',
+        reason: error instanceof Error ? error.message : String(error),
+      }
+      setImportSummary({
+        scanned: 0,
+        added: 0,
+        linkedToGroup: 0,
+        skipped: 0,
+        failed: 1,
+        targetGroupId: useSampleStore.getState().activeGroupId,
+        failures: [failure],
+      })
     } finally {
       useSampleStore.getState().setIsImporting(false)
     }
-  }, [importStructuredData, setDecodeProgress])
+  }, [runImport])
+
+  const handleImportFolder = useCallback(async () => {
+    if (useSampleStore.getState().isImporting) return
+    useSampleStore.getState().setIsImporting(true)
+    let selectedFolder: string | null = null
+
+    try {
+      selectedFolder = await window.electronAPI.openFolderDialog()
+      if (!selectedFolder) return
+      const scanResult = await window.electronAPI.scanFolder(selectedFolder)
+
+      const collectFiles = (node: ScannedFolderNode): string[] => [
+        ...node.files,
+        ...node.children.flatMap(collectFiles),
+      ]
+
+      if (!scanResult.root) {
+        await runImport({
+          filePaths: [],
+          scannedFileCount: scanResult.scannedFileCount,
+          initialFailures: scanResult.failures,
+          lockAlreadyHeld: true,
+        })
+        return
+      }
+
+      const { folders: builtFolders, rootFolderIds } = buildStructuredFolders(scanResult.root)
+      await runImport({
+        filePaths: collectFiles(scanResult.root),
+        importedFolders: builtFolders,
+        rootFolderIds,
+        scannedFileCount: scanResult.scannedFileCount,
+        initialFailures: scanResult.failures,
+        lockAlreadyHeld: true,
+      })
+    } catch (error) {
+      const failure: ImportFailure = {
+        path: selectedFolder ?? '文件夹选择',
+        stage: 'scan',
+        reason: error instanceof Error ? error.message : String(error),
+      }
+      setImportSummary({
+        scanned: 0,
+        added: 0,
+        linkedToGroup: 0,
+        skipped: 0,
+        failed: 1,
+        targetGroupId: useSampleStore.getState().activeGroupId,
+        failures: [failure],
+      })
+    } finally {
+      useSampleStore.getState().setIsImporting(false)
+    }
+  }, [runImport])
 
   const handleRemoveAllImported = useCallback(() => {
     const confirmed = window.confirm('确定移除当前导入的全部文件夹和素材吗？\n这不会删除磁盘上的原始文件。')
@@ -687,8 +759,10 @@ export default function App() {
       // @ts-ignore - File in Electron environment has a path property
       .map((f: any) => (f as any).path)
       .filter((p: string) => /\.(wav|mp3|ogg|flac|aiff?|m4a)$/i.test(p))
-    importFiles(paths)
-  }, [importFiles])
+    if (paths.length > 0) {
+      void runImport({ filePaths: paths, scannedFileCount: paths.length })
+    }
+  }, [runImport])
 
   // ------------------------------
   // 文件夹操作
@@ -847,6 +921,16 @@ export default function App() {
 
       {/* 分组筛选栏 */}
       <GroupBar />
+
+      {importSummary && (
+        <ImportResultBanner
+          summary={importSummary}
+          targetGroupName={importSummary.targetGroupId
+            ? groups.get(importSummary.targetGroupId)?.name ?? null
+            : null}
+          onClose={closeImportSummary}
+        />
+      )}
 
       {samples.size > 0 && (
         <div className="border-b border-white/5 bg-zinc-950 px-3 py-2">

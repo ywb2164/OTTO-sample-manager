@@ -12,6 +12,12 @@ interface ElectronScannedFolderNode {
   children: ElectronScannedFolderNode[]
 }
 
+interface ElectronScanFolderResult {
+  root: ElectronScannedFolderNode | null
+  scannedFileCount: number
+  failures: Array<{ path: string; stage: 'scan'; reason: string }>
+}
+
 declare global {
   interface Window {
     electronAPI: {
@@ -25,7 +31,7 @@ declare global {
       openFileDialog: () => Promise<string[]>
       openFolderDialog: () => Promise<string | null>
       openLyricsFileDialog: () => Promise<string | null>
-      scanFolder: (folderPath: string) => Promise<ElectronScannedFolderNode | null>
+      scanFolder: (folderPath: string) => Promise<ElectronScanFolderResult>
       getFileInfo: (filePath: string) => Promise<{ exists: boolean; fileSize: number }>
       validateFiles: (filePaths: string[]) => Promise<{ path: string; valid: boolean }[]>
       showInExplorer: (filePath: string) => void

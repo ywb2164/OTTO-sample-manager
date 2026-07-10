@@ -1,15 +1,15 @@
-import { app, BrowserWindow, ipcMain, dialog, nativeImage, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, nativeImage, screen, shell } from 'electron'
 import { join } from 'path'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, statSync } from 'fs'
 import Store from 'electron-store'
 import { cleanupManagedCopiesSync, createManagedCopySync, getLyricsAssembliesDir } from './copyManager'
 import { GitHubReleaseUpdateService } from './services/updateService'
+import { scanAudioFolder } from './folderScanner'
+import { calculatePrimarySidebarBounds } from './windowPlacement'
 
-interface ScannedFolderNode {
-  name: string
-  path: string
-  files: string[]
-  children: ScannedFolderNode[]
+const isolatedUserDataDir = process.env.OTTO_USER_DATA_DIR
+if (isolatedUserDataDir) {
+  app.setPath('userData', isolatedUserDataDir)
 }
 
 // ------------------------------
@@ -107,14 +107,16 @@ function resolveDragIcon() {
 // ------------------------------
 function createWindow(): void {
   const settings = store.get('settings') as any
+  const workArea = screen.getPrimaryDisplay().workArea
+  const bounds = calculatePrimarySidebarBounds(workArea, {
+    width: settings.windowWidth,
+    height: settings.windowHeight,
+  })
 
   mainWindow = new BrowserWindow({
-    width: settings.windowWidth || 380,
-    height: settings.windowHeight || 700,
-    x: settings.windowX,
-    y: settings.windowY,
-    minWidth: 300,
-    minHeight: 500,
+    ...bounds,
+    minWidth: Math.min(300, workArea.width),
+    minHeight: Math.min(500, workArea.height),
     maxWidth: 600,
     
     // 关键：悬浮窗配置
@@ -142,16 +144,13 @@ function createWindow(): void {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
-  // 保存窗口位置和大小
+  // 仅保存尺寸和透明度；下次启动重新贴合主屏右上角。
   mainWindow.on('close', () => {
     if (!mainWindow) return
     const [width, height] = mainWindow.getSize()
-    const [x, y] = mainWindow.getPosition()
     const opacity = mainWindow.getOpacity()
     store.set('settings.windowWidth', width)
     store.set('settings.windowHeight', height)
-    store.set('settings.windowX', x)
-    store.set('settings.windowY', y)
     store.set('settings.windowOpacity', opacity)
   })
 }
@@ -262,40 +261,7 @@ ipcMain.handle('dialog-open-lyrics-file', async () => {
 
 // 扫描文件夹结构，保留根目录与层级
 ipcMain.handle('scan-folder', async (_, folderPath: string) => {
-  const audioExts = ['.wav', '.mp3', '.ogg', '.flac', '.aiff', '.aif', '.m4a']
-
-  function scanDir(dir: string): ScannedFolderNode | null {
-    try {
-      const entries = readdirSync(dir, { withFileTypes: true })
-      const node: ScannedFolderNode = {
-        name: dir.replace(/\\/g, '/').split('/').pop() || dir,
-        path: dir,
-        files: [],
-        children: [],
-      }
-
-      for (const entry of entries) {
-        const fullPath = join(dir, entry.name)
-        if (entry.isDirectory()) {
-          const child = scanDir(fullPath)
-          if (child) {
-            node.children.push(child)
-          }
-        } else {
-          const ext = entry.name.includes('.') ? `.${entry.name.split('.').pop()?.toLowerCase()}` : ''
-          if (audioExts.includes(ext)) {
-            node.files.push(fullPath)
-          }
-        }
-      }
-
-      return node
-    } catch (e) {
-      return null
-    }
-  }
-
-  return scanDir(folderPath)
+  return scanAudioFolder(folderPath)
 })
 
 // 获取文件基础信息（不解码，只读元数据）

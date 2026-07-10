@@ -57,6 +57,7 @@ export default defineConfig({
               return 'renderer-vendor'
             }
 
+            return undefined
           }
         }
       }

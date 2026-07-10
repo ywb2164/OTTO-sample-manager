@@ -3,134 +3,9 @@ import { usePlayerStore } from '@/store/playerStore'
 import { useSampleStore } from '@/store/sampleStore'
 import { audioRuntimeCache } from '@/services/audioRuntimeCache'
 
-const AUDIO_BUFFER_CACHE_LIMIT_BYTES = 200 * 1024 * 1024
-const WAVEFORM_CACHE_LIMIT_BYTES = 50 * 1024 * 1024
 const isDev = import.meta.env.DEV
 let isShuttingDown = false
 let shutdownSummaryLogged = false
-
-type CacheEntry<V> = {
-  value: V
-  estimatedBytes: number
-  lastAccessAt: number
-}
-
-class ByteLimitedLRUCache<K, V> {
-  private cache = new Map<K, CacheEntry<V>>()
-  private totalBytes = 0
-
-  constructor(
-    private readonly name: string,
-    private readonly maxBytes: number,
-    private readonly isProtectedKey?: (key: K) => boolean,
-  ) {}
-
-  get(key: K): V | undefined {
-    const entry = this.cache.get(key)
-    if (!entry) return undefined
-    entry.lastAccessAt = Date.now()
-    this.cache.delete(key)
-    this.cache.set(key, entry)
-    return entry.value
-  }
-
-  has(key: K): boolean {
-    return this.cache.has(key)
-  }
-
-  set(key: K, value: V, estimatedBytes: number): void {
-    const now = Date.now()
-    const existing = this.cache.get(key)
-    if (existing) {
-      this.totalBytes -= existing.estimatedBytes
-      this.cache.delete(key)
-    }
-
-    this.cache.set(key, {
-      value,
-      estimatedBytes,
-      lastAccessAt: now,
-    })
-    this.totalBytes += estimatedBytes
-
-    if (isDev && !isShuttingDown) {
-      console.debug(`[cache:${this.name}] set`, {
-        key,
-        estimatedBytes,
-        totalBytes: this.totalBytes,
-        count: this.cache.size,
-      })
-    }
-
-    this.evictIfNeeded()
-  }
-
-  delete(key: K): boolean {
-    const entry = this.cache.get(key)
-    if (!entry) return false
-
-    this.totalBytes -= entry.estimatedBytes
-    this.cache.delete(key)
-    return true
-  }
-
-  clear(): void {
-    this.cache.clear()
-    this.totalBytes = 0
-  }
-
-  getStats() {
-    return {
-      count: this.cache.size,
-      bytes: this.totalBytes,
-      maxBytes: this.maxBytes,
-    }
-  }
-
-  private evictIfNeeded(): void {
-    if (this.totalBytes <= this.maxBytes) return
-
-    const candidates = [...this.cache.entries()]
-      .filter(([key]) => !this.isProtectedKey?.(key))
-      .sort((a, b) => a[1].lastAccessAt - b[1].lastAccessAt)
-
-    for (const [key, entry] of candidates) {
-      if (this.totalBytes <= this.maxBytes) break
-
-      this.cache.delete(key)
-      this.totalBytes -= entry.estimatedBytes
-
-      if (isDev && !isShuttingDown) {
-        console.debug(`[cache:${this.name}] evict`, {
-          key,
-          freedBytes: entry.estimatedBytes,
-          totalBytes: this.totalBytes,
-          count: this.cache.size,
-        })
-      }
-    }
-  }
-}
-
-const pinnedSampleIds = new Set<string>()
-
-function isPinnedSample(sampleId: string): boolean {
-  return pinnedSampleIds.has(sampleId)
-}
-
-// 波形数据缓存
-const waveformCache = new ByteLimitedLRUCache<string, Float32Array>(
-  'waveform',
-  WAVEFORM_CACHE_LIMIT_BYTES,
-  isPinnedSample,
-)
-
-// AudioBuffer LRU缓存
-const audioBufferCache = new ByteLimitedLRUCache<string, AudioBuffer>(
-  'audio-buffer',
-  AUDIO_BUFFER_CACHE_LIMIT_BYTES,
-  isPinnedSample,
-)
 
 // 全局AudioContext（单例）
 let audioContextInstance: AudioContext | null = null
@@ -140,18 +15,6 @@ function getAudioContext(): AudioContext {
     audioContextInstance = new AudioContext()
   }
   return audioContextInstance
-}
-
-function estimateAudioBufferBytes(audioBuffer: AudioBuffer): number {
-  return audioBuffer.length * audioBuffer.numberOfChannels * 4
-}
-
-function cacheAudioBuffer(sampleId: string, audioBuffer: AudioBuffer): void {
-  audioBufferCache.set(sampleId, audioBuffer, estimateAudioBufferBytes(audioBuffer))
-}
-
-function cacheWaveform(sampleId: string, waveform: Float32Array): void {
-  waveformCache.set(sampleId, waveform, waveform.byteLength)
 }
 
 function getCacheStatsSnapshot() {

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import { Sample, SampleGroup, SampleFolder, StructuredImportPayload } from '@/types'
+import type { CommitImportPayload, ImportSummary, Sample, SampleFolder, SampleGroup } from '@/types'
+import { commitLibraryImport } from '@/services/libraryImport'
 import {
   compareSampleSearchMatches,
   getSampleSearchIndexMap,
@@ -222,7 +223,7 @@ function getFolderDerivedData(folders: Map<string, SampleFolder>) {
     visit(folderId)
   })
 
-  folders.forEach((folder, folderId) => {
+  folders.forEach((_folder, folderId) => {
     if (!descendantSampleIdsByFolder.has(folderId)) {
       visit(folderId)
     }
@@ -464,7 +465,7 @@ interface SampleStore {
   lastGroupChangeTimestamp: number
 
   addSamples: (samples: Sample[]) => void
-  importStructuredData: (payload: StructuredImportPayload) => void
+  commitImport: (payload: CommitImportPayload) => ImportSummary
   restoreFolders: (folders: SampleFolder[], folderOrder: string[]) => void
   removeAllImported: () => void
   removeSamples: (ids: string[]) => void
@@ -583,49 +584,29 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     return { samples, folders, folderOrder }
   }),
 
-  importStructuredData: ({ samples: newSamples, folders: newFolders, rootFolderIds, targetGroupId }) => set((state) => {
-    const samples = new Map(state.samples)
-    const folders = new Map(state.folders)
-    const groups = new Map(state.groups)
-    const folderOrder = [...state.folderOrder]
-    const importedSampleIds: string[] = []
-    const existingFilePaths = new Set(Array.from(samples.values()).map((sample) => sample.filePath))
+  commitImport: (payload) => {
+    let summary: ImportSummary | null = null
 
-    for (const folder of newFolders) {
-      folders.set(folder.id, { ...folder })
-    }
+    set((state) => {
+      const result = commitLibraryImport({
+        samples: state.samples,
+        groups: state.groups,
+        folders: state.folders,
+        folderOrder: state.folderOrder,
+      }, payload)
+      summary = result.summary
 
-    for (const incomingSample of newSamples) {
-      const sample = {
-        ...incomingSample,
-        folderId: incomingSample.folderId ?? null,
+      return {
+        ...result.state,
+        lastGroupChangeTimestamp: Date.now(),
       }
+    })
 
-      if (existingFilePaths.has(sample.filePath)) continue
-
-      samples.set(sample.id, sample)
-      existingFilePaths.add(sample.filePath)
-      importedSampleIds.push(sample.id)
+    if (!summary) {
+      throw new Error('导入事务未能生成结果')
     }
-
-    for (const rootFolderId of rootFolderIds) {
-      if (!folderOrder.includes(rootFolderId)) {
-        folderOrder.unshift(rootFolderId)
-      }
-    }
-
-    if (targetGroupId) {
-      const group = groups.get(targetGroupId)
-      if (group) {
-        groups.set(targetGroupId, {
-          ...group,
-          sampleIds: [...new Set([...group.sampleIds, ...importedSampleIds])],
-        })
-      }
-    }
-
-    return { samples, folders, groups, folderOrder, lastGroupChangeTimestamp: Date.now() }
-  }),
+    return summary
+  },
 
   restoreFolders: (folderList, folderOrder) => set(() => ({
     folders: new Map(folderList.map((folder) => [folder.id, folder])),

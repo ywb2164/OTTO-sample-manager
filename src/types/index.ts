@@ -48,11 +48,39 @@ export interface ScannedFolderNode {
   children: ScannedFolderNode[]
 }
 
-export interface StructuredImportPayload {
-  samples: Sample[]
+export type ImportFailureStage = 'scan' | 'metadata' | 'commit'
+
+export interface ImportFailure {
+  path: string
+  stage: ImportFailureStage
+  reason: string
+}
+
+export interface ScanFolderResult {
+  root: ScannedFolderNode | null
+  scannedFileCount: number
+  failures: ImportFailure[]
+}
+
+export type ImportCandidate = Omit<Sample, 'groupIds'>
+
+export interface ImportSummary {
+  scanned: number
+  added: number
+  linkedToGroup: number
+  skipped: number
+  failed: number
+  targetGroupId: string | null
+  failures: ImportFailure[]
+}
+
+export interface CommitImportPayload {
+  candidates: ImportCandidate[]
   folders: SampleFolder[]
   rootFolderIds: string[]
   targetGroupId: string | null
+  scannedFileCount: number
+  failures: ImportFailure[]
 }
 
 export interface StoredFolderState {
