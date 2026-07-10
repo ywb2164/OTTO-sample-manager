@@ -74,6 +74,31 @@ export interface ImportSummary {
   failures: ImportFailure[]
 }
 
+export interface ImportUndoReceipt {
+  transactionId: string
+  createdAt: number
+  expectedLibraryRevision: number
+  targetGroupId: string | null
+  addedSampleIds: string[]
+  addedGroupLinks: Array<{ sampleId: string; groupId: string }>
+  previousSampleFolderIds: Array<{ sampleId: string; folderId: string | null }>
+  addedFolderIds: string[]
+  previousFolders: SampleFolder[]
+  previousFolderOrder: string[]
+  summary: ImportSummary
+}
+
+export interface UndoImportSummary {
+  removedSamples: number
+  removedGroupLinks: number
+  restoredFolders: number
+}
+
+export interface StoredImportUndoState {
+  libraryRevision: number
+  receipt: ImportUndoReceipt | null
+}
+
 export interface CommitImportPayload {
   candidates: ImportCandidate[]
   folders: SampleFolder[]

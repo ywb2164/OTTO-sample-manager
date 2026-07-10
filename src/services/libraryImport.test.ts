@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ImportCandidate, Sample, SampleFolder, SampleGroup } from '@/types'
-import { commitLibraryImport, reconcileLibraryState } from './libraryImport'
+import { commitLibraryImport, reconcileLibraryState, undoLibraryImport } from './libraryImport'
 
 function createSample(
   id: string,
@@ -198,6 +198,98 @@ describe('commitLibraryImport', () => {
     expect(result.summary.failed).toBe(1)
     expect(result.summary.failures[0]).toMatchObject({ stage: 'commit', path: 'missing-group' })
     expect(result.state.samples.get('new-1')?.groupIds).toEqual([])
+  })
+
+  it('creates an inverse receipt that removes new samples and only unlinks reused samples', () => {
+    const library = emptyLibrary()
+    library.samples.set('existing', createSample('existing', 'D:\\audio\\existing.wav'))
+    library.groups.set('group-a', createGroup('group-a'))
+
+    const imported = commitLibraryImport(library, {
+      candidates: [
+        createCandidate('new-1', 'D:\\audio\\new.wav'),
+        createCandidate('temporary', 'D:\\audio\\existing.wav'),
+      ],
+      folders: [],
+      rootFolderIds: [],
+      targetGroupId: 'group-a',
+      scannedFileCount: 2,
+      failures: [],
+    })
+
+    expect(imported.undoReceipt).not.toBeNull()
+    expect(imported.undoReceipt).toMatchObject({
+      addedSampleIds: ['new-1'],
+      addedGroupLinks: [{ sampleId: 'existing', groupId: 'group-a' }],
+    })
+
+    const undone = undoLibraryImport(imported.state, imported.undoReceipt!)
+
+    expect(undone.summary).toEqual({
+      removedSamples: 1,
+      removedGroupLinks: 1,
+      restoredFolders: 0,
+    })
+    expect(undone.state.samples.has('new-1')).toBe(false)
+    expect(undone.state.samples.get('existing')?.groupIds).toEqual([])
+    expect(undone.state.groups.get('group-a')?.sampleIds).toEqual([])
+  })
+
+  it('restores existing folder snapshots and folder order after undoing a repeated import', () => {
+    const library = emptyLibrary()
+    const root = createFolder('root', 'D:/pack', {
+      name: '自定义名称',
+      childFolderIds: ['old-child'],
+      isExpanded: false,
+    })
+    const oldChild = createFolder('old-child', 'D:/pack/old', {
+      parentId: 'root',
+      rootId: 'root',
+      depth: 1,
+    })
+    library.folders.set(root.id, root)
+    library.folders.set(oldChild.id, oldChild)
+    library.folderOrder.push(root.id)
+
+    const newChild = createFolder('new-child', 'D:/pack/new', {
+      parentId: 'root',
+      rootId: 'root',
+      depth: 1,
+    })
+    const imported = commitLibraryImport(library, {
+      candidates: [createCandidate('new-1', 'D:\\pack\\new\\new.wav', newChild.id)],
+      folders: [
+        createFolder('root', 'D:/pack', { childFolderIds: ['old-child', 'new-child'] }),
+        newChild,
+      ],
+      rootFolderIds: ['root'],
+      targetGroupId: null,
+      scannedFileCount: 1,
+      failures: [],
+    })
+
+    const undone = undoLibraryImport(imported.state, imported.undoReceipt!)
+
+    expect(undone.state.folders.has('new-child')).toBe(false)
+    expect(undone.state.folders.get('root')).toEqual(root)
+    expect(undone.state.folderOrder).toEqual(['root'])
+    expect(undone.summary.restoredFolders).toBe(1)
+  })
+
+  it('does not create an undo receipt for a no-op import', () => {
+    const library = emptyLibrary()
+    library.samples.set('existing', createSample('existing', 'D:\\audio\\existing.wav'))
+
+    const imported = commitLibraryImport(library, {
+      candidates: [createCandidate('temporary', 'D:\\audio\\existing.wav')],
+      folders: [],
+      rootFolderIds: [],
+      targetGroupId: null,
+      scannedFileCount: 1,
+      failures: [],
+    })
+
+    expect(imported.undoReceipt).toBeNull()
   })
 })
 

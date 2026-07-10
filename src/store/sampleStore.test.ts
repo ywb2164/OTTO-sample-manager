@@ -57,6 +57,9 @@ function resetStore() {
     showSelectionBar: false,
     searchQuery: '',
     lastGroupChangeTimestamp: Date.now(),
+    libraryRevision: 0,
+    lastImportUndo: null,
+    lastUndoSummary: null,
   })
 }
 
@@ -131,5 +134,81 @@ describe('sample store import transaction', () => {
     expect(next.samples.size).toBe(1)
     expect(next.samples.get('existing')?.groupIds).toEqual(['group-a'])
     expect(next.groups.get('group-a')?.sampleIds).toEqual(['existing'])
+  })
+
+  it('binds an import receipt to a revision and undoes exactly once', () => {
+    useSampleStore.setState({ groups: new Map([['group-a', createGroup('group-a')]]) })
+
+    useSampleStore.getState().commitImport({
+      candidates: [createCandidate('new-1', 'D:\\audio\\new.wav')],
+      folders: [],
+      rootFolderIds: [],
+      targetGroupId: 'group-a',
+      scannedFileCount: 1,
+      failures: [],
+    })
+
+    const imported = useSampleStore.getState()
+    expect(imported.libraryRevision).toBe(1)
+    expect(imported.lastImportUndo?.expectedLibraryRevision).toBe(1)
+
+    expect(imported.undoLastImport()).toEqual({
+      removedSamples: 1,
+      removedGroupLinks: 0,
+      restoredFolders: 0,
+    })
+    expect(useSampleStore.getState().samples.size).toBe(0)
+    expect(useSampleStore.getState().lastImportUndo).toBeNull()
+    expect(useSampleStore.getState().undoLastImport()).toBeNull()
+  })
+
+  it('keeps a valid receipt after a fully skipped import but invalidates it on semantic edits', () => {
+    const first = useSampleStore.getState().commitImport({
+      candidates: [createCandidate('new-1', 'D:\\audio\\new.wav')],
+      folders: [],
+      rootFolderIds: [],
+      targetGroupId: null,
+      scannedFileCount: 1,
+      failures: [],
+    })
+    expect(first.added).toBe(1)
+    const receipt = useSampleStore.getState().lastImportUndo
+
+    useSampleStore.getState().commitImport({
+      candidates: [createCandidate('temporary', 'D:\\audio\\new.wav')],
+      folders: [],
+      rootFolderIds: [],
+      targetGroupId: null,
+      scannedFileCount: 1,
+      failures: [],
+    })
+    expect(useSampleStore.getState().lastImportUndo).toEqual(receipt)
+
+    useSampleStore.getState().addGroup(createGroup('group-a'))
+    expect(useSampleStore.getState().lastImportUndo).toBeNull()
+    expect(useSampleStore.getState().libraryRevision).toBe(2)
+  })
+
+  it('does not invalidate undo for decode-only sample metadata updates', () => {
+    useSampleStore.getState().commitImport({
+      candidates: [createCandidate('new-1', 'D:\\audio\\new.wav')],
+      folders: [],
+      rootFolderIds: [],
+      targetGroupId: null,
+      scannedFileCount: 1,
+      failures: [],
+    })
+    const receipt = useSampleStore.getState().lastImportUndo
+
+    useSampleStore.getState().updateSample('new-1', {
+      duration: 2,
+      sampleRate: 44100,
+      channels: 2,
+      isDecoded: true,
+      isFileValid: true,
+    })
+
+    expect(useSampleStore.getState().lastImportUndo).toEqual(receipt)
+    expect(useSampleStore.getState().libraryRevision).toBe(1)
   })
 })

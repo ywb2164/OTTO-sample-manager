@@ -1,6 +1,19 @@
 import { create } from 'zustand'
-import type { CommitImportPayload, ImportSummary, Sample, SampleFolder, SampleGroup } from '@/types'
-import { commitLibraryImport } from '@/services/libraryImport'
+import type {
+  CommitImportPayload,
+  ImportSummary,
+  ImportUndoReceipt,
+  Sample,
+  SampleFolder,
+  SampleGroup,
+  StoredImportUndoState,
+  UndoImportSummary,
+} from '@/types'
+import {
+  commitLibraryImport,
+  isImportUndoReceiptApplicable,
+  undoLibraryImport,
+} from '@/services/libraryImport'
 import {
   compareSampleSearchMatches,
   getSampleSearchIndexMap,
@@ -456,16 +469,23 @@ interface SampleStore {
   hiddenSampleIds: Set<string>
   hiddenFolderIds: Set<string>
   contextMenuTarget: {
-    type: 'sample' | 'folder'
+    type: 'sample' | 'folder' | 'background'
     id: string
     x: number
     y: number
   } | null
   showSelectionBar: boolean
   lastGroupChangeTimestamp: number
+  libraryRevision: number
+  lastImportUndo: ImportUndoReceipt | null
+  lastUndoSummary: UndoImportSummary | null
 
   addSamples: (samples: Sample[]) => void
   commitImport: (payload: CommitImportPayload) => ImportSummary
+  undoLastImport: () => UndoImportSummary | null
+  invalidateLastImportUndo: () => void
+  restoreImportUndoState: (state: StoredImportUndoState | null | undefined) => void
+  clearUndoSummary: () => void
   restoreFolders: (folders: SampleFolder[], folderOrder: string[]) => void
   removeAllImported: () => void
   removeSamples: (ids: string[]) => void
@@ -507,7 +527,7 @@ interface SampleStore {
   toggleFolderHidden: (folderId: string) => void
   unhideAll: () => void
 
-  openContextMenu: (type: 'sample' | 'folder', id: string, x: number, y: number) => void
+  openContextMenu: (type: 'sample' | 'folder' | 'background', id: string, x: number, y: number) => void
   closeContextMenu: () => void
   setShowSelectionBar: (show: boolean) => void
 
@@ -546,6 +566,9 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
   contextMenuTarget: null,
   showSelectionBar: false,
   lastGroupChangeTimestamp: Date.now(),
+  libraryRevision: 0,
+  lastImportUndo: null,
+  lastUndoSummary: null,
 
   addSamples: (newSamples) => set((state) => {
     const samples = new Map(state.samples)
@@ -581,7 +604,14 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
       }
     }
 
-    return { samples, folders, folderOrder }
+    if (samples.size === state.samples.size) return {}
+    return {
+      samples,
+      folders,
+      folderOrder,
+      libraryRevision: state.libraryRevision + 1,
+      lastImportUndo: null,
+    }
   }),
 
   commitImport: (payload) => {
@@ -596,8 +626,23 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
       }, payload)
       summary = result.summary
 
+      if (!result.undoReceipt) {
+        return {
+          ...result.state,
+          lastGroupChangeTimestamp: Date.now(),
+        }
+      }
+
+      const libraryRevision = state.libraryRevision + 1
+
       return {
         ...result.state,
+        libraryRevision,
+        lastImportUndo: {
+          ...result.undoReceipt,
+          expectedLibraryRevision: libraryRevision,
+        },
+        lastUndoSummary: null,
         lastGroupChangeTimestamp: Date.now(),
       }
     })
@@ -607,6 +652,57 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     }
     return summary
   },
+
+  undoLastImport: () => {
+    let summary: UndoImportSummary | null = null
+
+    set((state) => {
+      const receipt = state.lastImportUndo
+      if (!receipt) return {}
+      if (
+        receipt.expectedLibraryRevision !== state.libraryRevision
+        || !isImportUndoReceiptApplicable(state, receipt)
+      ) {
+        return { lastImportUndo: null }
+      }
+
+      const result = undoLibraryImport(state, receipt)
+      summary = result.summary
+      return {
+        ...result.state,
+        libraryRevision: state.libraryRevision + 1,
+        lastImportUndo: null,
+        lastUndoSummary: result.summary,
+        selectedIds: new Set([...state.selectedIds].filter((id) => result.state.samples.has(id))),
+        lastGroupChangeTimestamp: Date.now(),
+      }
+    })
+
+    return summary
+  },
+
+  invalidateLastImportUndo: () => set((state) => ({
+    libraryRevision: state.libraryRevision + 1,
+    lastImportUndo: null,
+  })),
+
+  restoreImportUndoState: (stored) => set((state) => {
+    const libraryRevision = Number.isSafeInteger(stored?.libraryRevision)
+      ? stored!.libraryRevision
+      : 0
+    const receipt = stored?.receipt ?? null
+    const isValid = receipt !== null
+      && receipt.expectedLibraryRevision === libraryRevision
+      && isImportUndoReceiptApplicable(state, receipt)
+
+    return {
+      libraryRevision,
+      lastImportUndo: isValid ? receipt : null,
+      lastUndoSummary: null,
+    }
+  }),
+
+  clearUndoSummary: () => set({ lastUndoSummary: null }),
 
   restoreFolders: (folderList, folderOrder) => set(() => ({
     folders: new Map(folderList.map((folder) => [folder.id, folder])),
@@ -632,6 +728,9 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     isImporting: false,
     decodeProgress: null,
     lastGroupChangeTimestamp: Date.now(),
+    libraryRevision: get().libraryRevision + 1,
+    lastImportUndo: null,
+    lastUndoSummary: null,
   })),
 
   removeSamples: (ids) => set((state) => {
@@ -640,7 +739,10 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     const folders = new Map(state.folders)
     const selectedIds = new Set(state.selectedIds)
 
-    for (const id of ids) {
+    const existingIds = ids.filter((id) => state.samples.has(id))
+    if (existingIds.length === 0) return {}
+
+    for (const id of existingIds) {
       samples.delete(id)
       selectedIds.delete(id)
     }
@@ -648,18 +750,26 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     for (const [gid, group] of groups) {
       groups.set(gid, {
         ...group,
-        sampleIds: group.sampleIds.filter((sid) => !ids.includes(sid)),
+        sampleIds: group.sampleIds.filter((sid) => !existingIds.includes(sid)),
       })
     }
 
     for (const [fid, folder] of folders) {
       folders.set(fid, {
         ...folder,
-        sampleIds: folder.sampleIds.filter((sid) => !ids.includes(sid)),
+        sampleIds: folder.sampleIds.filter((sid) => !existingIds.includes(sid)),
       })
     }
 
-    return { samples, groups, folders, selectedIds, lastGroupChangeTimestamp: Date.now() }
+    return {
+      samples,
+      groups,
+      folders,
+      selectedIds,
+      libraryRevision: state.libraryRevision + 1,
+      lastImportUndo: null,
+      lastGroupChangeTimestamp: Date.now(),
+    }
   }),
 
   updateSample: (id, patch) => set((state) => {
@@ -675,7 +785,13 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     const groups = new Map(state.groups)
     groups.set(group.id, group)
     const groupOrder = reconcileGroupOrder(state.groupOrder, groups)
-    return { groups, groupOrder, lastGroupChangeTimestamp: Date.now() }
+    return {
+      groups,
+      groupOrder,
+      libraryRevision: state.libraryRevision + 1,
+      lastImportUndo: null,
+      lastGroupChangeTimestamp: Date.now(),
+    }
   }),
 
   removeGroup: (id) => set((state) => {
@@ -693,14 +809,26 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     }
 
     const groupOrder = reconcileGroupOrder(state.groupOrder.filter((groupId) => groupId !== id), groups)
-    return { groups, groupOrder, samples, lastGroupChangeTimestamp: Date.now() }
+    return {
+      groups,
+      groupOrder,
+      samples,
+      libraryRevision: state.libraryRevision + 1,
+      lastImportUndo: null,
+      lastGroupChangeTimestamp: Date.now(),
+    }
   }),
 
   renameGroup: (id, name) => set((state) => {
     const groups = new Map(state.groups)
     const group = groups.get(id)
     if (group) groups.set(id, { ...group, name })
-    return { groups, lastGroupChangeTimestamp: Date.now() }
+    return {
+      groups,
+      libraryRevision: state.libraryRevision + 1,
+      lastImportUndo: null,
+      lastGroupChangeTimestamp: Date.now(),
+    }
   }),
 
   moveGroup: (draggedGroupId, targetGroupId) => set((state) => {
@@ -714,7 +842,12 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     const nextTargetIndex = groupOrder.indexOf(targetGroupId)
     groupOrder.splice(nextTargetIndex, 0, draggedId)
 
-    return { groupOrder, lastGroupChangeTimestamp: Date.now() }
+    return {
+      groupOrder,
+      libraryRevision: state.libraryRevision + 1,
+      lastImportUndo: null,
+      lastGroupChangeTimestamp: Date.now(),
+    }
   }),
 
   restoreGroupOrder: (groupOrder, providedGroups) => set((state) => ({
@@ -740,7 +873,13 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
       })
     }
 
-    return { samples, groups, lastGroupChangeTimestamp: Date.now() }
+    return {
+      samples,
+      groups,
+      libraryRevision: state.libraryRevision + 1,
+      lastImportUndo: null,
+      lastGroupChangeTimestamp: Date.now(),
+    }
   }),
 
   removeFromGroup: (sampleIds, groupId) => set((state) => {
@@ -765,7 +904,13 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
       })
     }
 
-    return { samples, groups, lastGroupChangeTimestamp: Date.now() }
+    return {
+      samples,
+      groups,
+      libraryRevision: state.libraryRevision + 1,
+      lastImportUndo: null,
+      lastGroupChangeTimestamp: Date.now(),
+    }
   }),
 
   setSearchQuery: (searchQuery) => set((state) => {
@@ -858,7 +1003,12 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     const folders = new Map(state.folders)
     folders.set(folder.id, folder)
     const folderOrder = folder.parentId ? state.folderOrder : [folder.id, ...state.folderOrder]
-    return { folders, folderOrder }
+    return {
+      folders,
+      folderOrder,
+      libraryRevision: state.libraryRevision + 1,
+      lastImportUndo: null,
+    }
   }),
 
   removeFolder: (id) => set((state) => {
@@ -919,6 +1069,8 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
       expandedFolderIds,
       hiddenFolderIds,
       hiddenSampleIds,
+      libraryRevision: state.libraryRevision + 1,
+      lastImportUndo: null,
       lastGroupChangeTimestamp: Date.now(),
     }
   }),
@@ -926,10 +1078,13 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
   renameFolder: (id, name) => set((state) => {
     const folders = new Map(state.folders)
     const folder = folders.get(id)
-    if (folder) {
-      folders.set(id, { ...folder, name })
+    if (!folder || folder.name === name) return {}
+    folders.set(id, { ...folder, name })
+    return {
+      folders,
+      libraryRevision: state.libraryRevision + 1,
+      lastImportUndo: null,
     }
-    return { folders }
   }),
 
   toggleFolderExpanded: (id) => set((state) => {
@@ -950,10 +1105,17 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
   }),
 
   moveFolder: (fromIndex, toIndex) => set((state) => {
+    if (fromIndex === toIndex || !state.folderOrder[fromIndex] || toIndex < 0 || toIndex >= state.folderOrder.length) {
+      return {}
+    }
     const folderOrder = [...state.folderOrder]
     const [moved] = folderOrder.splice(fromIndex, 1)
     folderOrder.splice(toIndex, 0, moved)
-    return { folderOrder }
+    return {
+      folderOrder,
+      libraryRevision: state.libraryRevision + 1,
+      lastImportUndo: null,
+    }
   }),
 
   setExpandOnSearch: (value) => set((state) => ({

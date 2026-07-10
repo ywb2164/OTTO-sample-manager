@@ -75,6 +75,7 @@ export const SampleItem: React.FC<Props> = ({
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
+    e.stopPropagation()
     // 如果样本未被选中，则选中它（清空其他选中）
     if (!selectedIds.has(sample.id)) {
       setSelected(new Set([sample.id]))

@@ -2,9 +2,11 @@ import type {
   CommitImportPayload,
   ImportFailure,
   ImportSummary,
+  ImportUndoReceipt,
   Sample,
   SampleFolder,
   SampleGroup,
+  UndoImportSummary,
 } from '@/types'
 
 export interface LibraryState {
@@ -17,6 +19,12 @@ export interface LibraryState {
 export interface LibraryImportResult {
   state: LibraryState
   summary: ImportSummary
+  undoReceipt: ImportUndoReceipt | null
+}
+
+export interface UndoLibraryImportResult {
+  state: LibraryState
+  summary: UndoImportSummary
 }
 
 function unique<T>(values: T[]): T[] {
@@ -37,6 +45,14 @@ function cloneFolder(folder: SampleFolder): SampleFolder {
     sampleIds: [...folder.sampleIds],
     childFolderIds: [...folder.childFolderIds],
   }
+}
+
+function foldersEqual(left: SampleFolder, right: SampleFolder): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function createTransactionId(): string {
+  return `import_${Date.now()}_${Math.random().toString(36).slice(2)}`
 }
 
 function normalizePath(filePath: string): string {
@@ -213,14 +229,13 @@ export function commitLibraryImport(
       .map((folder) => folder.id),
   ])
 
-  return {
-    state: {
+  const state: LibraryState = {
       samples: rebuilt.samples,
       groups,
       folders: rebuilt.folders,
       folderOrder,
-    },
-    summary: {
+  }
+  const summary: ImportSummary = {
       scanned: payload.scannedFileCount,
       added,
       linkedToGroup,
@@ -228,8 +243,118 @@ export function commitLibraryImport(
       failed: failures.length,
       targetGroupId: validTargetGroupId,
       failures,
+  }
+
+  const addedSampleIds = Array.from(state.samples.keys()).filter((sampleId) => !current.samples.has(sampleId))
+  const addedSampleIdSet = new Set(addedSampleIds)
+  const addedGroupLinks: ImportUndoReceipt['addedGroupLinks'] = []
+  const previousSampleFolderIds: ImportUndoReceipt['previousSampleFolderIds'] = []
+
+  state.samples.forEach((sample, sampleId) => {
+    const previous = current.samples.get(sampleId)
+    if (!previous || addedSampleIdSet.has(sampleId)) return
+    sample.groupIds.forEach((groupId) => {
+      if (!previous.groupIds.includes(groupId)) addedGroupLinks.push({ sampleId, groupId })
+    })
+    if ((sample.folderId ?? null) !== (previous.folderId ?? null)) {
+      previousSampleFolderIds.push({ sampleId, folderId: previous.folderId ?? null })
+    }
+  })
+
+  const addedFolderIds = Array.from(state.folders.keys()).filter((folderId) => !current.folders.has(folderId))
+  const previousFolders = Array.from(current.folders.values())
+    .filter((folder) => {
+      const changed = state.folders.get(folder.id)
+      return changed !== undefined && !foldersEqual(folder, changed)
+    })
+    .map(cloneFolder)
+  // A receipt represents a successful import, not incidental reconciliation of
+  // legacy folder data. A fully skipped/failed import must preserve the previous
+  // valid undo opportunity in the store.
+  const changed = added > 0 || linkedToGroup > 0
+
+  return {
+    state,
+    summary,
+    undoReceipt: changed ? {
+      transactionId: createTransactionId(),
+      createdAt: Date.now(),
+      expectedLibraryRevision: 0,
+      targetGroupId: validTargetGroupId,
+      addedSampleIds,
+      addedGroupLinks,
+      previousSampleFolderIds,
+      addedFolderIds,
+      previousFolders,
+      previousFolderOrder: [...current.folderOrder],
+      summary: { ...summary, failures: summary.failures.map((failure) => ({ ...failure })) },
+    } : null,
+  }
+}
+
+export function undoLibraryImport(
+  current: LibraryState,
+  receipt: ImportUndoReceipt,
+): UndoLibraryImportResult {
+  const samples = new Map(Array.from(current.samples, ([id, sample]) => [id, cloneSample(sample)]))
+  const groups = new Map(Array.from(current.groups, ([id, group]) => [id, cloneGroup(group)]))
+  const folders = new Map(Array.from(current.folders, ([id, folder]) => [id, cloneFolder(folder)]))
+
+  let removedSamples = 0
+  receipt.addedSampleIds.forEach((sampleId) => {
+    if (samples.delete(sampleId)) removedSamples += 1
+    groups.forEach((group) => {
+      group.sampleIds = group.sampleIds.filter((id) => id !== sampleId)
+    })
+  })
+
+  let removedGroupLinks = 0
+  receipt.addedGroupLinks.forEach(({ sampleId, groupId }) => {
+    const sample = samples.get(sampleId)
+    const group = groups.get(groupId)
+    if (sample?.groupIds.includes(groupId)) {
+      sample.groupIds = sample.groupIds.filter((id) => id !== groupId)
+      removedGroupLinks += 1
+    }
+    if (group) group.sampleIds = group.sampleIds.filter((id) => id !== sampleId)
+  })
+
+  receipt.previousSampleFolderIds.forEach(({ sampleId, folderId }) => {
+    const sample = samples.get(sampleId)
+    if (sample) sample.folderId = folderId
+  })
+  receipt.addedFolderIds.forEach((folderId) => folders.delete(folderId))
+  receipt.previousFolders.forEach((folder) => folders.set(folder.id, cloneFolder(folder)))
+
+  const reconciled = reconcileLibraryState({
+    samples,
+    groups,
+    folders,
+    folderOrder: [...receipt.previousFolderOrder],
+  })
+  reconciled.folderOrder = receipt.previousFolderOrder.filter((folderId) => reconciled.folders.has(folderId))
+
+  return {
+    state: reconciled,
+    summary: {
+      removedSamples,
+      removedGroupLinks,
+      restoredFolders: receipt.previousFolders.length,
     },
   }
+}
+
+export function isImportUndoReceiptApplicable(
+  current: LibraryState,
+  receipt: ImportUndoReceipt,
+): boolean {
+  if (!receipt.addedSampleIds.every((sampleId) => current.samples.has(sampleId))) return false
+  if (!receipt.addedFolderIds.every((folderId) => current.folders.has(folderId))) return false
+
+  return receipt.addedGroupLinks.every(({ sampleId, groupId }) =>
+    current.samples.get(sampleId)?.groupIds.includes(groupId) === true
+    && current.groups.get(groupId)?.sampleIds.includes(sampleId) === true,
+  )
 }
 
 export function reconcileLibraryState(current: LibraryState): LibraryState {

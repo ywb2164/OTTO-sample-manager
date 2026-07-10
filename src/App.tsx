@@ -25,6 +25,7 @@ import type {
   SampleFolder,
   ScannedFolderNode,
   StoredFolderState,
+  StoredImportUndoState,
 } from '@/types'
 import { reconcileLibraryState } from '@/services/libraryImport'
 import { buildLyricsSourceSampleIndex, planLyricsAssembly } from '@/services/lyricsSampleAssembler'
@@ -119,6 +120,9 @@ export default function App() {
   const searchQuery = useSampleStore(state => state.searchQuery)
   const activeGroupId = useSampleStore(state => state.activeGroupId)
   const contextMenuTarget = useSampleStore(state => state.contextMenuTarget)
+  const lastUndoSummary = useSampleStore(state => state.lastUndoSummary)
+  const libraryRevision = useSampleStore(state => state.libraryRevision)
+  const lastImportUndo = useSampleStore(state => state.lastImportUndo)
 
   const [currentWaveform, setCurrentWaveform] = useState<Float32Array | null>(null)
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null)
@@ -135,6 +139,10 @@ export default function App() {
     failedCopies: number
   } | null>(null)
   const closeImportSummary = useCallback(() => setImportSummary(null), [])
+  const handleListContextMenu = useCallback((event: React.MouseEvent) => {
+    event.preventDefault()
+    useSampleStore.getState().openContextMenu('background', '', event.clientX, event.clientY)
+  }, [])
 
   const orderedIds = getOrderedIds()
   const selectableCount = orderedIds.length
@@ -215,6 +223,7 @@ export default function App() {
       const storedSettings = await window.electronAPI.storeGet('folderSettings') as any
       const storedGroups = await window.electronAPI.storeGet('groups') as Record<string, any> | null
       const storedGroupOrder = await window.electronAPI.storeGet('groupOrder') as string[] | null
+      const storedImportUndoState = await window.electronAPI.storeGet('importUndoState') as StoredImportUndoState | null
 
       if (storedSettings) {
         const {
@@ -291,6 +300,7 @@ export default function App() {
         lastGroupChangeTimestamp: Date.now(),
       })
       useSampleStore.getState().restoreGroupOrder(storedGroupOrder, reconciled.groups)
+      useSampleStore.getState().restoreImportUndoState(storedImportUndoState)
 
       setHasHydratedStore(true)
     }
@@ -386,6 +396,18 @@ export default function App() {
       console.error('保存 folderSettings 失败', error)
     })
   }, [folderSettings, hasHydratedStore])
+
+  useEffect(() => {
+    if (!hasHydratedStore) return
+    const { libraryRevision, lastImportUndo } = useSampleStore.getState()
+    const importUndoState: StoredImportUndoState = {
+      libraryRevision,
+      receipt: lastImportUndo,
+    }
+    window.electronAPI.storeSet('importUndoState', importUndoState).catch((error) => {
+      console.error('保存 importUndoState 失败', error)
+    })
+  }, [hasHydratedStore, libraryRevision, lastImportUndo])
 
   useEffect(() => {
     if (!currentSampleId || samples.has(currentSampleId)) {
@@ -932,6 +954,21 @@ export default function App() {
         />
       )}
 
+      {lastUndoSummary && (
+        <div className="flex items-center justify-between border-b border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+          <span>
+            已移除新增 {lastUndoSummary.removedSamples} 条、解除归组 {lastUndoSummary.removedGroupLinks} 条、恢复目录 {lastUndoSummary.restoredFolders} 个
+          </span>
+          <button
+            className="rounded p-1 hover:bg-white/10"
+            aria-label="关闭撤回结果"
+            onClick={() => useSampleStore.getState().clearUndoSummary()}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {samples.size > 0 && (
         <div className="border-b border-white/5 bg-zinc-950 px-3 py-2">
           <label className="flex w-fit cursor-pointer items-center gap-2 rounded-md border border-white/5 bg-transparent px-2.5 py-1.5 text-xs text-zinc-300 transition-colors hover:bg-white/[0.035] hover:text-zinc-100">
@@ -958,6 +995,7 @@ export default function App() {
         ref={listRef}
         className="h-full overflow-y-auto overflow-x-hidden"
         style={{ contain: 'strict' }}
+        onContextMenu={handleListContextMenu}
       >
         {flattenedItems.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-zinc-400">
