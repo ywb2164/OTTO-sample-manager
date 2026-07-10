@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { ImportCandidate, Sample, SampleGroup } from '@/types'
 import { useSampleStore } from './sampleStore'
+import { audioRuntimeCache } from '@/services/audioRuntimeCache'
 
 function createGroup(id: string): SampleGroup {
   return {
@@ -210,5 +211,15 @@ describe('sample store import transaction', () => {
 
     expect(useSampleStore.getState().lastImportUndo).toEqual(receipt)
     expect(useSampleStore.getState().libraryRevision).toBe(1)
+  })
+
+  it('applies memory optimization cache budgets through the persisted setting action', () => {
+    useSampleStore.getState().setMemoryOptimizationMode(true)
+    expect(audioRuntimeCache.getStats()).toMatchObject({
+      audioBuffer: { maxBytes: 64 * 1024 * 1024 },
+      waveform: { maxBytes: 8 * 1024 * 1024 },
+    })
+
+    useSampleStore.getState().setMemoryOptimizationMode(false)
   })
 })

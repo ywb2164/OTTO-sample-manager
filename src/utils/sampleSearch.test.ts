@@ -141,4 +141,44 @@ describe('sample search', () => {
 
     expect(searchMatches(sample, '$')).toBe(false)
   })
+
+  it('reuses existing index entries when only decoded metadata changes', () => {
+    const original = createSample({ id: 'kick', fileName: 'kick' })
+    const firstMap = new Map([[original.id, original]])
+    const firstIndex = getSampleSearchIndexMap(firstMap).get(original.id)
+    const updatedMap = new Map([[original.id, { ...original, duration: 3, isDecoded: true }]])
+
+    const updatedIndex = getSampleSearchIndexMap(updatedMap).get(original.id)
+
+    expect(updatedIndex).toBe(firstIndex)
+  })
+
+  it('only creates or removes indexes whose id or searchable filename changed', () => {
+    const kick = createSample({ id: 'kick', fileName: 'kick' })
+    const snare = createSample({ id: 'snare', fileName: 'snare' })
+    const first = getSampleSearchIndexMap(new Map([[kick.id, kick], [snare.id, snare]]))
+    const firstKickIndex = first.get('kick')
+
+    const next = getSampleSearchIndexMap(new Map([
+      ['kick', kick],
+      ['clap', createSample({ id: 'clap', fileName: 'clap' })],
+    ]))
+
+    expect(next.get('kick')).toBe(firstKickIndex)
+    expect(next.has('snare')).toBe(false)
+    expect(next.get('clap')).toBeDefined()
+  })
+
+  it('rebuilds only a renamed sample index', () => {
+    const original = createSample({ id: 'kick', fileName: 'kick' })
+    const first = getSampleSearchIndexMap(new Map([[original.id, original]]))
+    const renamed = { ...original, fileName: 'boom' }
+
+    const next = getSampleSearchIndexMap(new Map([[renamed.id, renamed]]))
+
+    expect(next.get('kick')).not.toBe(first.get('kick'))
+    expect(matchSampleSearch(next.get('kick')!, parseSearchQuery('boom'), {
+      enableChinesePinyinFuzzySearch: false,
+    })).not.toBeNull()
+  })
 })

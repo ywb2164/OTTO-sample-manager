@@ -479,14 +479,17 @@ export default function App() {
     const folderMap = new Map(importedFolders.map((folder) => [folder.path, folder]))
 
     try {
+      const fileInfoByPath = new Map(
+        (await window.electronAPI.getFilesInfo(filePaths)).map((fileInfo) => [fileInfo.path, fileInfo]),
+      )
       for (const [index, filePath] of filePaths.entries()) {
         try {
-          const fileInfo = await window.electronAPI.getFileInfo(filePath)
+          const fileInfo = fileInfoByPath.get(filePath)
           if (!fileInfo?.exists) {
             failures.push({
               path: filePath,
               stage: 'metadata',
-              reason: '文件不存在或无法读取',
+              reason: fileInfo?.reason || '文件不存在或无法读取',
             })
             continue
           }

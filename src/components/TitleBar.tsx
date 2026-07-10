@@ -240,7 +240,7 @@ export const TitleBar: React.FC<Props> = ({
                 <SettingCheckbox
                   checked={folderSettings.memoryOptimizationMode}
                   label="内存优化模式"
-                  note="仅加载当前可见范围附近的音频数据。"
+                  note="降低已解码音频和波形缓存上限（64 MiB / 8 MiB）。"
                   onChange={setMemoryOptimizationMode}
                 />
 

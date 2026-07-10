@@ -20,6 +20,8 @@ export type AudioRuntimeCacheStats = {
 
 const AUDIO_BUFFER_CACHE_LIMIT_BYTES = 200 * 1024 * 1024
 const WAVEFORM_CACHE_LIMIT_BYTES = 50 * 1024 * 1024
+const OPTIMIZED_AUDIO_BUFFER_CACHE_LIMIT_BYTES = 64 * 1024 * 1024
+const OPTIMIZED_WAVEFORM_CACHE_LIMIT_BYTES = 8 * 1024 * 1024
 const isDev = import.meta.env.DEV
 
 class ByteLimitedRuntimeCache<K, V> {
@@ -31,7 +33,7 @@ class ByteLimitedRuntimeCache<K, V> {
 
   constructor(
     private readonly name: string,
-    private readonly maxBytes: number,
+    private maxBytes: number,
     private readonly isProtectedKey?: (key: K) => boolean,
   ) {}
 
@@ -102,6 +104,15 @@ class ByteLimitedRuntimeCache<K, V> {
       evictions: this.evictions,
       maxBytes: this.maxBytes,
     }
+  }
+
+  setMaxBytes(maxBytes: number): void {
+    this.maxBytes = maxBytes
+    this.evictIfNeeded()
+  }
+
+  enforceLimit(): void {
+    this.evictIfNeeded()
   }
 
   private evictIfNeeded(): void {
@@ -193,6 +204,17 @@ export const audioRuntimeCache = {
 
   unpinSample(sampleId: string): void {
     pinnedSampleIds.delete(sampleId)
+    audioBufferCache.enforceLimit()
+    waveformCache.enforceLimit()
+  },
+
+  setMemoryOptimizationMode(enabled: boolean): void {
+    audioBufferCache.setMaxBytes(enabled
+      ? OPTIMIZED_AUDIO_BUFFER_CACHE_LIMIT_BYTES
+      : AUDIO_BUFFER_CACHE_LIMIT_BYTES)
+    waveformCache.setMaxBytes(enabled
+      ? OPTIMIZED_WAVEFORM_CACHE_LIMIT_BYTES
+      : WAVEFORM_CACHE_LIMIT_BYTES)
   },
 
   getPendingDecode(sampleId: string): Promise<AudioBuffer | null> | undefined {
@@ -217,6 +239,14 @@ export const audioRuntimeCache = {
 
   clearPendingWaveform(sampleId: string): void {
     pendingWaveformPromises.delete(sampleId)
+  },
+
+  removeSample(sampleId: string): void {
+    audioBufferCache.delete(sampleId)
+    waveformCache.delete(sampleId)
+    pendingDecodePromises.delete(sampleId)
+    pendingWaveformPromises.delete(sampleId)
+    pinnedSampleIds.delete(sampleId)
   },
 
   clearPending(): void {

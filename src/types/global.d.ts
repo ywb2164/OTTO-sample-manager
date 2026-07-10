@@ -36,7 +36,7 @@ declare global {
       openFolderDialog: () => Promise<string | null>
       openLyricsFileDialog: () => Promise<string | null>
       scanFolder: (folderPath: string) => Promise<ElectronScanFolderResult>
-      getFileInfo: (filePath: string) => Promise<{ exists: boolean; fileSize: number }>
+      getFilesInfo: (filePaths: string[]) => Promise<Array<{ path: string; exists: boolean; fileSize: number; reason?: string }>>
       validateFiles: (filePaths: string[]) => Promise<{ path: string; valid: boolean }[]>
       showInExplorer: (filePath: string) => void
       openExternalLink: (url: string) => void

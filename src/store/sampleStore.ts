@@ -14,6 +14,7 @@ import {
   isImportUndoReceiptApplicable,
   undoLibraryImport,
 } from '@/services/libraryImport'
+import { audioRuntimeCache } from '@/services/audioRuntimeCache'
 import {
   compareSampleSearchMatches,
   getSampleSearchIndexMap,
@@ -668,6 +669,7 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
 
       const result = undoLibraryImport(state, receipt)
       summary = result.summary
+      receipt.addedSampleIds.forEach((sampleId) => audioRuntimeCache.removeSample(sampleId))
       return {
         ...result.state,
         libraryRevision: state.libraryRevision + 1,
@@ -709,7 +711,9 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     folderOrder,
   })),
 
-  removeAllImported: () => set(() => ({
+  removeAllImported: () => set(() => {
+    audioRuntimeCache.clearAll()
+    return {
     samples: new Map(),
     groups: new Map(),
     groupOrder: [],
@@ -731,7 +735,8 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     libraryRevision: get().libraryRevision + 1,
     lastImportUndo: null,
     lastUndoSummary: null,
-  })),
+    }
+  }),
 
   removeSamples: (ids) => set((state) => {
     const samples = new Map(state.samples)
@@ -745,6 +750,7 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     for (const id of existingIds) {
       samples.delete(id)
       selectedIds.delete(id)
+      audioRuntimeCache.removeSample(id)
     }
 
     for (const [gid, group] of groups) {
@@ -1050,6 +1056,7 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
       samples.delete(sampleId)
       selectedIds.delete(sampleId)
       hiddenSampleIds.delete(sampleId)
+      audioRuntimeCache.removeSample(sampleId)
     }
 
     for (const [groupId, group] of groups) {
@@ -1126,9 +1133,12 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     folderSettings: { ...state.folderSettings, folderClassificationEnabled: value },
   })),
 
-  setMemoryOptimizationMode: (value) => set((state) => ({
-    folderSettings: { ...state.folderSettings, memoryOptimizationMode: value },
-  })),
+  setMemoryOptimizationMode: (value) => {
+    audioRuntimeCache.setMemoryOptimizationMode(value)
+    set((state) => ({
+      folderSettings: { ...state.folderSettings, memoryOptimizationMode: value },
+    }))
+  },
 
   setEnableChinesePinyinFuzzySearch: (value) => set((state) => ({
     folderSettings: { ...state.folderSettings, enableChinesePinyinFuzzySearch: value },

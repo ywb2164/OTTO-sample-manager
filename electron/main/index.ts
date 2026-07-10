@@ -6,6 +6,7 @@ import { autoUpdater } from 'electron-updater'
 import { cleanupManagedCopiesSync, createManagedCopySync, getLyricsAssembliesDir } from './copyManager'
 import { UpdateService } from './services/updateService'
 import { scanAudioFolder } from './folderScanner'
+import { getFilesInfo } from './fileInfo'
 import { calculatePrimarySidebarBounds } from './windowPlacement'
 
 const isolatedUserDataDir = process.env.OTTO_USER_DATA_DIR
@@ -280,18 +281,8 @@ ipcMain.handle('scan-folder', async (_, folderPath: string) => {
   return scanAudioFolder(folderPath)
 })
 
-// 获取文件基础信息（不解码，只读元数据）
-ipcMain.handle('get-file-info', async (_, filePath: string) => {
-  try {
-    const stat = statSync(filePath)
-    return {
-      exists: true,
-      fileSize: stat.size,
-    }
-  } catch {
-    return { exists: false, fileSize: 0 }
-  }
-})
+// 批量获取文件基础信息（不解码、不读取音频正文）。
+ipcMain.handle('get-files-info', async (_, filePaths: string[]) => getFilesInfo(filePaths))
 
 // 批量验证文件是否仍然存在
 ipcMain.handle('validate-files', async (_, filePaths: string[]) => {

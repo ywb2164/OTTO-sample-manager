@@ -18,7 +18,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFolderDialog: () => ipcRenderer.invoke('dialog-open-folder'),
   openLyricsFileDialog: () => ipcRenderer.invoke('dialog-open-lyrics-file'),
   scanFolder: (folderPath: string) => ipcRenderer.invoke('scan-folder', folderPath),
-  getFileInfo: (filePath: string) => ipcRenderer.invoke('get-file-info', filePath),
+  getFilesInfo: (filePaths: string[]) => ipcRenderer.invoke('get-files-info', filePaths),
   validateFiles: (filePaths: string[]) => ipcRenderer.invoke('validate-files', filePaths),
   showInExplorer: (filePath: string) => ipcRenderer.send('show-in-explorer', filePath),
   openExternalLink: (url: string) => ipcRenderer.send('open-external-link', url),
@@ -80,7 +80,7 @@ declare global {
         scannedFileCount: number
         failures: Array<{ path: string; stage: 'scan'; reason: string }>
       }>
-      getFileInfo: (filePath: string) => Promise<{ exists: boolean; fileSize: number }>
+      getFilesInfo: (filePaths: string[]) => Promise<Array<{ path: string; exists: boolean; fileSize: number; reason?: string }>>
       validateFiles: (filePaths: string[]) => Promise<{ path: string; valid: boolean }[]>
       showInExplorer: (filePath: string) => void
       openExternalLink: (url: string) => void
