@@ -3,6 +3,7 @@ dist
 dist-electron
 release
 out
+/Copy/
 .env
 .DS_Store
 .eslintcache
