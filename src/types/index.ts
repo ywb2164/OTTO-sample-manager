@@ -48,11 +48,84 @@ export interface ScannedFolderNode {
   children: ScannedFolderNode[]
 }
 
-export interface StructuredImportPayload {
-  samples: Sample[]
+export type ImportFailureStage = 'scan' | 'metadata' | 'commit'
+
+export interface ImportFailure {
+  path: string
+  stage: ImportFailureStage
+  reason: string
+}
+
+export interface ScanFolderResult {
+  root: ScannedFolderNode | null
+  scannedFileCount: number
+  failures: ImportFailure[]
+}
+
+export type ImportCandidate = Omit<Sample, 'groupIds'>
+
+export interface ImportSummary {
+  scanned: number
+  added: number
+  linkedToGroup: number
+  skipped: number
+  failed: number
+  targetGroupId: string | null
+  failures: ImportFailure[]
+}
+
+export interface ImportUndoReceipt {
+  transactionId: string
+  createdAt: number
+  expectedLibraryRevision: number
+  targetGroupId: string | null
+  addedSampleIds: string[]
+  addedGroupLinks: Array<{ sampleId: string; groupId: string }>
+  previousSampleFolderIds: Array<{ sampleId: string; folderId: string | null }>
+  addedFolderIds: string[]
+  previousFolders: SampleFolder[]
+  previousFolderOrder: string[]
+  summary: ImportSummary
+}
+
+export interface UndoImportSummary {
+  removedSamples: number
+  removedGroupLinks: number
+  restoredFolders: number
+}
+
+export interface StoredImportUndoState {
+  libraryRevision: number
+  receipt: ImportUndoReceipt | null
+}
+
+export type UpdatePhase =
+  | 'idle'
+  | 'checking'
+  | 'up-to-date'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'installing'
+  | 'unsupported'
+  | 'error'
+
+export interface UpdateState {
+  phase: UpdatePhase
+  currentVersion: string
+  availableVersion: string | null
+  progressPercent: number | null
+  message: string | null
+  action: 'none' | 'download-and-restart' | 'open-portable-download'
+}
+
+export interface CommitImportPayload {
+  candidates: ImportCandidate[]
   folders: SampleFolder[]
   rootFolderIds: string[]
   targetGroupId: string | null
+  scannedFileCount: number
+  failures: ImportFailure[]
 }
 
 export interface StoredFolderState {

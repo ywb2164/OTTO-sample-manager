@@ -69,6 +69,9 @@ describe('ContextMenu', () => {
       contextMenuTarget: null,
       showSelectionBar: false,
       lastGroupChangeTimestamp: Date.now(),
+      libraryRevision: 0,
+      lastImportUndo: null,
+      lastUndoSummary: null,
     })
   })
 
@@ -131,5 +134,37 @@ describe('ContextMenu', () => {
     expect(state.samples.get('sample-a')?.groupIds).toContain('favorites')
     expect(state.samples.get('sample-b')?.groupIds).toContain('favorites')
     expect(state.groups.get('favorites')?.sampleIds).toEqual(['sample-a', 'sample-b'])
+  })
+
+  it('shows a disabled undo item on the list background without a valid receipt', () => {
+    useSampleStore.setState({
+      contextMenuTarget: { type: 'background', id: '', x: 12, y: 24 },
+    })
+
+    render(<ContextMenu />)
+
+    expect((screen.getByRole('button', { name: '暂无可撤回导入' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByText('隐藏')).toBeNull()
+  })
+
+  it('confirms that undo only removes manager records', () => {
+    useSampleStore.getState().commitImport({
+      candidates: [{ ...createSample('new-1'), groupIds: undefined } as never],
+      folders: [],
+      rootFolderIds: [],
+      targetGroupId: null,
+      scannedFileCount: 1,
+      failures: [],
+    })
+    useSampleStore.setState({
+      contextMenuTarget: { type: 'background', id: '', x: 12, y: 24 },
+    })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    render(<ContextMenu />)
+    fireEvent.click(screen.getByRole('button', { name: /撤回上次导入/ }))
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('不会删除磁盘文件'))
+    expect(useSampleStore.getState().samples.size).toBe(0)
   })
 })

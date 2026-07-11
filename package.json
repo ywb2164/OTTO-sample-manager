@@ -20,6 +20,7 @@
   "dependencies": {
     "@tanstack/react-virtual": "^3.0.1",
     "electron-store": "8.2.0",
+    "electron-updater": "6.8.9",
     "lucide-react": "^1.14.0",
     "pinyin-pro": "^3.28.0",
     "uuid": "^13.0.0",

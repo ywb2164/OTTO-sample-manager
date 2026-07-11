@@ -26,7 +26,6 @@ files:
   - '!**/{test,tests,__tests__,spec,specs,example,examples,demo,demos,docs,doc,benchmark,benchmarks}/**'
   - '!**/node_modules/**/{test,tests,__tests__,spec,specs,example,examples,demo,demos,docs,doc,benchmark,benchmarks}/**'
   - '!**/node_modules/**/.github/**'
-  - '!**/node_modules/**/src/**'
   - '!**/node_modules/**/.runkit_example.js'
   - '!**/node_modules/**/dist-src/**'
 extraResources:
@@ -37,6 +36,9 @@ win:
   icon: icon.ico
   target:
     - target: nsis
+      arch:
+        - x64
+    - target: portable
       arch:
         - x64
 nsis:
@@ -52,6 +54,8 @@ nsis:
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
   createStartMenuShortcut: true
+portable:
+  artifactName: ${name}-${version}-portable.${ext}
 mac:
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
@@ -73,7 +77,10 @@ appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
 publish:
-  provider: generic
-  url: https://example.com/auto-updates
+  provider: github
+  owner: ywb2164
+  repo: OTTO-sample-manager
+  releaseType: draft
+electronUpdaterCompatibility: ">=2.16"
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/

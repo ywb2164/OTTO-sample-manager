@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { UpdateState } from '../updateTypes'
 
 // 向渲染进程暴露安全的API
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -17,7 +18,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFolderDialog: () => ipcRenderer.invoke('dialog-open-folder'),
   openLyricsFileDialog: () => ipcRenderer.invoke('dialog-open-lyrics-file'),
   scanFolder: (folderPath: string) => ipcRenderer.invoke('scan-folder', folderPath),
-  getFileInfo: (filePath: string) => ipcRenderer.invoke('get-file-info', filePath),
+  getFilesInfo: (filePaths: string[]) => ipcRenderer.invoke('get-files-info', filePaths),
   validateFiles: (filePaths: string[]) => ipcRenderer.invoke('validate-files', filePaths),
   showInExplorer: (filePath: string) => ipcRenderer.send('show-in-explorer', filePath),
   openExternalLink: (url: string) => ipcRenderer.send('open-external-link', url),
@@ -43,8 +44,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     targetGroupName: string
     items: Array<{ id: string; sourcePath: string; fileName: string }>
   }) => ipcRenderer.invoke('lyrics-create-files', payload),
-  checkForUpdates: (options?: { silentIfNoUpdate?: boolean; showErrors?: boolean }) =>
-    ipcRenderer.invoke('app-check-for-updates', options)
+  getUpdateState: () => ipcRenderer.invoke('update-get-state'),
+  checkForUpdates: (options?: { manual?: boolean }) => ipcRenderer.invoke('update-check', options),
+  startUpdate: () => ipcRenderer.invoke('update-start'),
+  onUpdateState: (listener: (state: unknown) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, state: unknown) => listener(state)
+    ipcRenderer.on('update-state', wrapped)
+    return () => ipcRenderer.removeListener('update-state', wrapped)
+  },
 })
 
 // TypeScript类型声明
@@ -68,8 +75,12 @@ declare global {
       openFileDialog: () => Promise<string[]>
       openFolderDialog: () => Promise<string | null>
       openLyricsFileDialog: () => Promise<string | null>
-      scanFolder: (folderPath: string) => Promise<ScannedFolderNode | null>
-      getFileInfo: (filePath: string) => Promise<{ exists: boolean; fileSize: number }>
+      scanFolder: (folderPath: string) => Promise<{
+        root: ScannedFolderNode | null
+        scannedFileCount: number
+        failures: Array<{ path: string; stage: 'scan'; reason: string }>
+      }>
+      getFilesInfo: (filePaths: string[]) => Promise<Array<{ path: string; exists: boolean; fileSize: number; reason?: string }>>
       validateFiles: (filePaths: string[]) => Promise<{ path: string; valid: boolean }[]>
       showInExplorer: (filePath: string) => void
       openExternalLink: (url: string) => void
@@ -86,10 +97,10 @@ declare global {
         failed: Array<{ id: string; sourcePath: string; reason: string }>
         targetDir: string | null
       }>
-      checkForUpdates: (options?: {
-        silentIfNoUpdate?: boolean
-        showErrors?: boolean
-      }) => Promise<void>
+      getUpdateState: () => Promise<UpdateState>
+      checkForUpdates: (options?: { manual?: boolean }) => Promise<UpdateState>
+      startUpdate: () => Promise<void>
+      onUpdateState: (listener: (state: UpdateState) => void) => () => void
     }
   }
 }

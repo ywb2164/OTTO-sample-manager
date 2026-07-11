@@ -25,7 +25,7 @@ const WaveformPlaceholder: React.FC = () => (
 )
 
 export const StatusBar: React.FC<Props> = ({ waveformData, onSeek, onPrimaryAction, canControl, isPrimaryPlaying }) => {
-  const { currentSampleId, isPlaying, currentTime, duration } = usePlayerStore()
+  const { currentSampleId, currentTime, duration } = usePlayerStore()
   const { samples, selectedIds } = useSampleStore()
   const progressBarRef = useRef<HTMLDivElement>(null)
   const suppressClickRef = useRef(false)

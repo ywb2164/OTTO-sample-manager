@@ -14,6 +14,8 @@ export const ContextMenu: React.FC = () => {
   const removeFromGroup = useSampleStore(s => s.removeFromGroup)
   const samples = useSampleStore(s => s.samples)
   const getFolderSampleIds = useSampleStore(s => s.getFolderSampleIds)
+  const lastImportUndo = useSampleStore(s => s.lastImportUndo)
+  const undoLastImport = useSampleStore(s => s.undoLastImport)
 
   const [showGroupSubmenu, setShowGroupSubmenu] = useState(false)
 
@@ -76,6 +78,15 @@ export const ContextMenu: React.FC = () => {
     closeContextMenu()
   }, [closeContextMenu])
 
+  const handleUndoImport = useCallback(() => {
+    if (!lastImportUndo) return
+    const confirmed = window.confirm(
+      '确定撤回上次导入吗？\n这只会移除管理器中的新增记录和归组关系，不会删除磁盘文件。',
+    )
+    if (confirmed) undoLastImport()
+    closeContextMenu()
+  }, [lastImportUndo, undoLastImport, closeContextMenu])
+
   const handleGroupAction = useCallback((groupId: string) => {
     if (!contextMenuTarget) return
 
@@ -111,13 +122,38 @@ export const ContextMenu: React.FC = () => {
   const targetSampleIds = contextMenuTarget
     ? contextMenuTarget.type === 'sample'
       ? samples.has(contextMenuTarget.id) ? [contextMenuTarget.id] : []
-      : getFolderSampleIds(contextMenuTarget.id)
+      : contextMenuTarget.type === 'folder'
+        ? getFolderSampleIds(contextMenuTarget.id)
+        : []
     : []
   const groupTargetLabel = contextMenuTarget?.type === 'folder' ? '分配文件夹到分组' : '分配到分组'
   const groupTargetSampleCount = targetSampleIds.length
   const groupList = Array.from(groups.values())
 
   if (!contextMenuTarget) return null
+
+  if (contextMenuTarget.type === 'background') {
+    const label = lastImportUndo
+      ? `撤回上次导入（新增 ${lastImportUndo.summary.added} / 归组 ${lastImportUndo.summary.linkedToGroup}）`
+      : '暂无可撤回导入'
+
+    return (
+      <div
+        id="context-menu"
+        className="fixed z-[100] min-w-[220px] rounded-lg border border-white/5 bg-zinc-950/95 py-1.5 shadow-lg shadow-black/30 backdrop-blur-xl"
+        style={{ left: `${contextMenuTarget.x}px`, top: `${contextMenuTarget.y}px` }}
+      >
+        <button
+          className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-text-primary transition-colors enabled:hover:bg-bg-hover disabled:cursor-not-allowed disabled:text-text-dim"
+          disabled={!lastImportUndo}
+          onClick={handleUndoImport}
+        >
+          <RotateCcw size={14} />
+          <span>{label}</span>
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div

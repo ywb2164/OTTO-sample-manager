@@ -1,8 +1,12 @@
 export {}
 
-interface ElectronCheckForUpdatesOptions {
-  silentIfNoUpdate?: boolean
-  showErrors?: boolean
+interface ElectronUpdateState {
+  phase: 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'unsupported' | 'error'
+  currentVersion: string
+  availableVersion: string | null
+  progressPercent: number | null
+  message: string | null
+  action: 'none' | 'download-and-restart' | 'open-portable-download'
 }
 
 interface ElectronScannedFolderNode {
@@ -10,6 +14,12 @@ interface ElectronScannedFolderNode {
   path: string
   files: string[]
   children: ElectronScannedFolderNode[]
+}
+
+interface ElectronScanFolderResult {
+  root: ElectronScannedFolderNode | null
+  scannedFileCount: number
+  failures: Array<{ path: string; stage: 'scan'; reason: string }>
 }
 
 declare global {
@@ -25,8 +35,8 @@ declare global {
       openFileDialog: () => Promise<string[]>
       openFolderDialog: () => Promise<string | null>
       openLyricsFileDialog: () => Promise<string | null>
-      scanFolder: (folderPath: string) => Promise<ElectronScannedFolderNode | null>
-      getFileInfo: (filePath: string) => Promise<{ exists: boolean; fileSize: number }>
+      scanFolder: (folderPath: string) => Promise<ElectronScanFolderResult>
+      getFilesInfo: (filePaths: string[]) => Promise<Array<{ path: string; exists: boolean; fileSize: number; reason?: string }>>
       validateFiles: (filePaths: string[]) => Promise<{ path: string; valid: boolean }[]>
       showInExplorer: (filePath: string) => void
       openExternalLink: (url: string) => void
@@ -43,7 +53,10 @@ declare global {
         failed: Array<{ id: string; sourcePath: string; reason: string }>
         targetDir: string | null
       }>
-      checkForUpdates: (options?: ElectronCheckForUpdatesOptions) => Promise<void>
+      getUpdateState: () => Promise<ElectronUpdateState>
+      checkForUpdates: (options?: { manual?: boolean }) => Promise<ElectronUpdateState>
+      startUpdate: () => Promise<void>
+      onUpdateState: (listener: (state: ElectronUpdateState) => void) => () => void
     }
   }
 }

@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react'
 import { useSampleStore } from '@/store/sampleStore'
+import type { UpdateState } from '@/types'
 import appIconUrl from '../../tmp-app-icon.png'
 
 interface Props {
@@ -23,6 +24,9 @@ interface Props {
   onAssembleLyrics: () => void
   onRemoveAllImported: () => void
   isImporting: boolean
+  updateState: UpdateState
+  onCheckForUpdates: () => void
+  onStartUpdate: () => void
 }
 
 export const TitleBar: React.FC<Props> = ({
@@ -31,6 +35,9 @@ export const TitleBar: React.FC<Props> = ({
   onAssembleLyrics,
   onRemoveAllImported,
   isImporting,
+  updateState,
+  onCheckForUpdates,
+  onStartUpdate,
 }) => {
   const [alwaysOnTop, setAlwaysOnTop] = useState(true)
   const [opacity, setOpacity] = useState(1.0)
@@ -39,7 +46,6 @@ export const TitleBar: React.FC<Props> = ({
   const [keepCopies, setKeepCopies] = useState(false)
   const [showImportMenu, setShowImportMenu] = useState(false)
   const [showSettingsMenu, setShowSettingsMenu] = useState(false)
-  const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false)
   const {
     folderSettings,
     setExpandOnSearch,
@@ -106,19 +112,17 @@ export const TitleBar: React.FC<Props> = ({
     window.electronAPI.openExternalLink(url)
   }
 
-  const handleCheckForUpdates = async () => {
-    if (isCheckingForUpdates) return
-
-    setIsCheckingForUpdates(true)
-    try {
-      await window.electronAPI.checkForUpdates({
-        silentIfNoUpdate: false,
-        showErrors: true,
-      })
-    } finally {
-      setIsCheckingForUpdates(false)
-    }
-  }
+  const isUpdating = updateState.phase === 'downloading' || updateState.phase === 'installing'
+  const updateLabel = (() => {
+    if (updateState.phase === 'checking') return '检查中'
+    if (updateState.phase === 'up-to-date') return '已是最新'
+    if (updateState.phase === 'available') return `发现 ${updateState.availableVersion ?? '更新'}`
+    if (updateState.phase === 'downloading') return `下载 ${updateState.progressPercent ?? 0}%`
+    if (updateState.phase === 'installing') return '正在安装并重启'
+    if (updateState.phase === 'unsupported') return '便携版需重新下载'
+    if (updateState.phase === 'error') return '更新失败，重试'
+    return '检查更新'
+  })()
 
   const iconButtonClassName =
     'inline-flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary'
@@ -236,7 +240,7 @@ export const TitleBar: React.FC<Props> = ({
                 <SettingCheckbox
                   checked={folderSettings.memoryOptimizationMode}
                   label="内存优化模式"
-                  note="仅加载当前可见范围附近的音频数据。"
+                  note="降低已解码音频和波形缓存上限（64 MiB / 8 MiB）。"
                   onChange={setMemoryOptimizationMode}
                 />
 
@@ -261,13 +265,23 @@ export const TitleBar: React.FC<Props> = ({
                     <span className="truncate">版本 {appVersion || '读取中'}</span>
                     <button
                       className="inline-flex items-center gap-1 rounded-md bg-accent-dim px-2 py-1.5 text-xs text-accent-light transition-colors hover:bg-accent-primary/25 disabled:cursor-wait disabled:opacity-70"
-                      onClick={handleCheckForUpdates}
-                      disabled={isCheckingForUpdates}
+                      onClick={updateState.action === 'none' ? onCheckForUpdates : onStartUpdate}
+                      disabled={isUpdating || updateState.phase === 'checking'}
+                      title={updateState.message ?? undefined}
                     >
-                      <CheckCircle2 size={13} />
-                      <span>{isCheckingForUpdates ? '检查中' : '检查更新'}</span>
+                      {updateState.action === 'download-and-restart' ? <Download size={13} /> : <CheckCircle2 size={13} />}
+                      <span>{updateState.action === 'download-and-restart' ? '下载并自动重启' : updateLabel}</span>
                     </button>
                   </div>
+                  {updateState.phase === 'available' && (
+                    <div className="text-[11px] text-text-dim">发现 {updateState.availableVersion}</div>
+                  )}
+                  {updateState.phase === 'unsupported' && (
+                    <div className="text-[11px] text-text-dim">便携版不会覆盖运行中的 EXE。</div>
+                  )}
+                  {updateState.phase === 'error' && updateState.message && (
+                    <div className="text-[11px] text-red-300">{updateState.message}</div>
+                  )}
                 </div>
 
                 <div className="border-t border-border-subtle pt-3">

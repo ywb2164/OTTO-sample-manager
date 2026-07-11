@@ -1,19 +1,21 @@
-import { app, BrowserWindow, ipcMain, dialog, nativeImage, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, nativeImage, screen, shell } from 'electron'
 import { dirname, join } from 'path'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, statSync } from 'fs'
 import Store from 'electron-store'
+import { autoUpdater } from 'electron-updater'
 import { cleanupManagedCopiesSync, createManagedCopySync, getLyricsAssembliesDir } from './copyManager'
 import { mergeStagedLyricsAssemblies, migratePersistedSamplePaths } from './copyMigration'
-import { GitHubReleaseUpdateService } from './services/updateService'
+import { UpdateService } from './services/updateService'
+import { scanAudioFolder } from './folderScanner'
+import { getFilesInfo } from './fileInfo'
+import { calculatePrimarySidebarBounds } from './windowPlacement'
+
+const isolatedUserDataDir = process.env.OTTO_USER_DATA_DIR
+if (isolatedUserDataDir) {
+  app.setPath('userData', isolatedUserDataDir)
+}
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
-
-interface ScannedFolderNode {
-  name: string
-  path: string
-  files: string[]
-  children: ScannedFolderNode[]
-}
 
 // ------------------------------
 // electron-store 初始化
@@ -40,14 +42,30 @@ const store = new Store({
 })
 
 let mainWindow: BrowserWindow | null = null
-const GITHUB_LATEST_RELEASE_API_URL =
-  'https://api.github.com/repos/ywb2164/OTTO-sample-manager/releases/latest'
+const PORTABLE_RELEASE_URL =
+  'https://github.com/ywb2164/OTTO-sample-manager/releases/latest'
 const FALLBACK_DRAG_ICON_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn7L6kAAAAASUVORK5CYII='
 
-const updateService = new GitHubReleaseUpdateService({
-  apiUrl: GITHUB_LATEST_RELEASE_API_URL,
-  getWindow: () => mainWindow,
+const isPortableBuild = Boolean(process.env.PORTABLE_EXECUTABLE_FILE || process.env.PORTABLE_EXECUTABLE_DIR)
+
+if (process.env.OTTO_UPDATE_FEED_URL) {
+  autoUpdater.setFeedURL({
+    provider: 'generic',
+    url: process.env.OTTO_UPDATE_FEED_URL,
+  })
+}
+
+const updateService = new UpdateService({
+  updater: autoUpdater,
+  currentVersion: app.getVersion(),
+  portable: isPortableBuild,
+  openPortableDownload: async () => {
+    await shell.openExternal(PORTABLE_RELEASE_URL)
+  },
+  onStateChange: (state) => {
+    mainWindow?.webContents.send('update-state', state)
+  },
 })
 
 function createFallbackDragIcon() {
@@ -110,14 +128,16 @@ function resolveDragIcon() {
 // ------------------------------
 function createWindow(): void {
   const settings = store.get('settings') as any
+  const workArea = screen.getPrimaryDisplay().workArea
+  const bounds = calculatePrimarySidebarBounds(workArea, {
+    width: settings.windowWidth,
+    height: settings.windowHeight,
+  })
 
   mainWindow = new BrowserWindow({
-    width: settings.windowWidth || 380,
-    height: settings.windowHeight || 700,
-    x: settings.windowX,
-    y: settings.windowY,
-    minWidth: 300,
-    minHeight: 500,
+    ...bounds,
+    minWidth: Math.min(300, workArea.width),
+    minHeight: Math.min(500, workArea.height),
     maxWidth: 600,
     
     // 关键：悬浮窗配置
@@ -145,16 +165,13 @@ function createWindow(): void {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
-  // 保存窗口位置和大小
+  // 仅保存尺寸和透明度；下次启动重新贴合主屏右上角。
   mainWindow.on('close', () => {
     if (!mainWindow) return
     const [width, height] = mainWindow.getSize()
-    const [x, y] = mainWindow.getPosition()
     const opacity = mainWindow.getOpacity()
     store.set('settings.windowWidth', width)
     store.set('settings.windowHeight', height)
-    store.set('settings.windowX', x)
-    store.set('settings.windowY', y)
     store.set('settings.windowOpacity', opacity)
   })
 
@@ -206,10 +223,9 @@ if (!hasSingleInstanceLock) {
     }
 
     createWindow()
-    void updateService.checkForUpdates({
-      silentIfNoUpdate: true,
-      showErrors: false,
-    })
+    if (app.isPackaged || process.env.OTTO_UPDATE_FEED_URL) {
+      void updateService.checkForUpdates()
+    }
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -311,54 +327,11 @@ ipcMain.handle('dialog-open-lyrics-file', async () => {
 
 // 扫描文件夹结构，保留根目录与层级
 ipcMain.handle('scan-folder', async (_, folderPath: string) => {
-  const audioExts = ['.wav', '.mp3', '.ogg', '.flac', '.aiff', '.aif', '.m4a']
-
-  function scanDir(dir: string): ScannedFolderNode | null {
-    try {
-      const entries = readdirSync(dir, { withFileTypes: true })
-      const node: ScannedFolderNode = {
-        name: dir.replace(/\\/g, '/').split('/').pop() || dir,
-        path: dir,
-        files: [],
-        children: [],
-      }
-
-      for (const entry of entries) {
-        const fullPath = join(dir, entry.name)
-        if (entry.isDirectory()) {
-          const child = scanDir(fullPath)
-          if (child) {
-            node.children.push(child)
-          }
-        } else {
-          const ext = entry.name.includes('.') ? `.${entry.name.split('.').pop()?.toLowerCase()}` : ''
-          if (audioExts.includes(ext)) {
-            node.files.push(fullPath)
-          }
-        }
-      }
-
-      return node
-    } catch (e) {
-      return null
-    }
-  }
-
-  return scanDir(folderPath)
+  return scanAudioFolder(folderPath)
 })
 
-// 获取文件基础信息（不解码，只读元数据）
-ipcMain.handle('get-file-info', async (_, filePath: string) => {
-  try {
-    const stat = statSync(filePath)
-    return {
-      exists: true,
-      fileSize: stat.size,
-    }
-  } catch {
-    return { exists: false, fileSize: 0 }
-  }
-})
+// 批量获取文件基础信息（不解码、不读取音频正文）。
+ipcMain.handle('get-files-info', async (_, filePaths: string[]) => getFilesInfo(filePaths))
 
 // 批量验证文件是否仍然存在
 ipcMain.handle('validate-files', async (_, filePaths: string[]) => {
@@ -374,12 +347,9 @@ ipcMain.on('open-external-link', (_, url: string) => {
   shell.openExternal(url)
 })
 
-ipcMain.handle('app-check-for-updates', async (_, options?: {
-  silentIfNoUpdate?: boolean
-  showErrors?: boolean
-}) => {
-  await updateService.checkForUpdates(options)
-})
+ipcMain.handle('update-get-state', () => updateService.getState())
+ipcMain.handle('update-check', async (_, options?: { manual?: boolean }) => updateService.checkForUpdates(options))
+ipcMain.handle('update-start', async () => updateService.startUpdate())
 
 // ------------------------------
 // 原生文件拖拽（核心功能）

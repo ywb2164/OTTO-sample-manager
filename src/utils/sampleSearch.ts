@@ -72,11 +72,13 @@ export type SampleSearchOptions = {
 type SampleSearchIndexCache = {
   samplesRef: Map<string, Sample> | null
   indexesById: Map<string, SampleSearchIndex>
+  searchableSignatureById: Map<string, string>
 }
 
 const sampleSearchIndexCache: SampleSearchIndexCache = {
   samplesRef: null,
   indexesById: new Map(),
+  searchableSignatureById: new Map(),
 }
 
 function isChineseChar(char: string): boolean {
@@ -164,12 +166,21 @@ export function getSampleSearchIndexMap(samples: Map<string, Sample>): Map<strin
   }
 
   const indexesById = new Map<string, SampleSearchIndex>()
+  const searchableSignatureById = new Map<string, string>()
   samples.forEach((sample) => {
-    indexesById.set(sample.id, buildSampleSearchIndex(sample))
+    const signature = `${sample.fileName}\u0000${sample.fileExt}`
+    const cached = sampleSearchIndexCache.indexesById.get(sample.id)
+    if (cached && sampleSearchIndexCache.searchableSignatureById.get(sample.id) === signature) {
+      indexesById.set(sample.id, cached)
+    } else {
+      indexesById.set(sample.id, buildSampleSearchIndex(sample))
+    }
+    searchableSignatureById.set(sample.id, signature)
   })
 
   sampleSearchIndexCache.samplesRef = samples
   sampleSearchIndexCache.indexesById = indexesById
+  sampleSearchIndexCache.searchableSignatureById = searchableSignatureById
 
   return indexesById
 }
