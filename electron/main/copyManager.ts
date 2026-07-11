@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { copyFile, mkdir, readdir, rm } from 'fs/promises'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'fs'
-import { basename, dirname, extname, join } from 'path'
+import { basename, extname, join } from 'path'
 
 export interface CopySourceItem {
   id: string
@@ -24,7 +24,7 @@ const LYRICS_ASSEMBLIES_DIR_NAME = 'lyrics-assemblies'
 
 function getPreferredCopiesRoot(): string {
   if (app.isPackaged) {
-    return join(dirname(app.getPath('exe')), 'Copy')
+    return join(app.getPath('userData'), 'Copy')
   }
 
   return join(app.getAppPath(), 'Copy')
@@ -39,7 +39,7 @@ async function resolveCopiesRoot(): Promise<string> {
     return resolvedCopiesRoot
   }
 
-  const candidates = [getPreferredCopiesRoot(), getFallbackCopiesRoot()]
+  const candidates = [...new Set([getPreferredCopiesRoot(), getFallbackCopiesRoot()])]
 
   for (const candidate of candidates) {
     try {
@@ -59,7 +59,7 @@ function resolveCopiesRootSync(): string {
     return resolvedCopiesRoot
   }
 
-  const candidates = [getPreferredCopiesRoot(), getFallbackCopiesRoot()]
+  const candidates = [...new Set([getPreferredCopiesRoot(), getFallbackCopiesRoot()])]
 
   for (const candidate of candidates) {
     try {

@@ -1,9 +1,12 @@
 import { app, BrowserWindow, ipcMain, dialog, nativeImage, shell } from 'electron'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'fs'
 import Store from 'electron-store'
 import { cleanupManagedCopiesSync, createManagedCopySync, getLyricsAssembliesDir } from './copyManager'
+import { mergeStagedLyricsAssemblies, migratePersistedSamplePaths } from './copyMigration'
 import { GitHubReleaseUpdateService } from './services/updateService'
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
 interface ScannedFolderNode {
   name: string
@@ -154,40 +157,86 @@ function createWindow(): void {
     store.set('settings.windowY', y)
     store.set('settings.windowOpacity', opacity)
   })
+
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
 }
 
-app.whenReady().then(() => {
-  createWindow()
-  void updateService.checkForUpdates({
-    silentIfNoUpdate: true,
-    showErrors: false,
-  })
-  
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
-})
+async function migrateLegacyCopyData(): Promise<void> {
+  if (!app.isPackaged) return
 
-app.on('before-quit', () => {
-  const copySettings = (store.get('copySettings') as { enableAutoCopy?: boolean; keepCopies?: boolean } | undefined) ?? {}
-  console.debug('[cleanup] copySettings=', copySettings)
-  if (copySettings.keepCopies) {
-    console.debug('[cleanup] preserveCopies=true, skip drag-copies cleanup')
-    return
+  const userDataRoot = app.getPath('userData')
+  const targetCopyRoot = join(userDataRoot, 'Copy')
+  const stagingRoot = join(userDataRoot, 'copy-migration')
+  const legacyCopyRoot = join(dirname(app.getPath('exe')), 'Copy')
+
+  await mergeStagedLyricsAssemblies(stagingRoot, targetCopyRoot)
+
+  const storedSamples = store.get('samples') as Record<string, { filePath?: unknown; [key: string]: unknown }> | undefined
+  if (!storedSamples) return
+
+  const migration = migratePersistedSamplePaths(
+    storedSamples,
+    legacyCopyRoot,
+    targetCopyRoot,
+    existsSync,
+  )
+
+  if (migration.changed) {
+    store.set('samples', migration.samples)
   }
+}
 
-  try {
-    console.debug('[cleanup] preserveCopies=false, remove drag-copies')
-    cleanupManagedCopiesSync()
-    store.set('dragCounts', {})
-  } catch {
-    // 清理失败时不阻塞退出
-  }
-})
+if (!hasSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  })
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
-})
+  app.whenReady().then(async () => {
+    try {
+      await migrateLegacyCopyData()
+    } catch (error) {
+      console.error('[copy migration] failed, preserving staged data for retry', error)
+    }
+
+    createWindow()
+    void updateService.checkForUpdates({
+      silentIfNoUpdate: true,
+      showErrors: false,
+    })
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
+  })
+
+  app.on('before-quit', () => {
+    const copySettings = (store.get('copySettings') as { enableAutoCopy?: boolean; keepCopies?: boolean } | undefined) ?? {}
+    console.debug('[cleanup] copySettings=', copySettings)
+    if (copySettings.keepCopies) {
+      console.debug('[cleanup] preserveCopies=true, skip drag-copies cleanup')
+      return
+    }
+
+    try {
+      console.debug('[cleanup] preserveCopies=false, remove drag-copies')
+      cleanupManagedCopiesSync()
+      store.set('dragCounts', {})
+    } catch {
+      // 清理失败时不阻塞退出
+    }
+  })
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit()
+  })
+}
 
 // ==============================
 // IPC 处理器

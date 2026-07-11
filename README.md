@@ -73,7 +73,7 @@ OTTO Sample Manager：
 
 - 第一次拖出：使用原文件
 - 第二次开始：生成副本
-- 副本存储在 **应用安装位置 / Copy**
+- 打包版副本存储在 **用户数据目录 / Copy**（Windows 默认为 `%APPDATA%/sample-manager/Copy`）
 - 副本不在 UI 显示
 
 ---
@@ -137,7 +137,7 @@ OTTO Sample Manager：
 生成素材存储在：
 
 ```
-应用目录 / Copy / lyrics-assemblies /
+用户数据目录 / Copy / lyrics-assemblies /
 ```
 
 说明：
@@ -145,6 +145,7 @@ OTTO Sample Manager：
 - 与普通副本共享 Copy 体系
 - 但**不会被清理**
 - 属于长期资产（不是临时文件）
+- 覆盖升级或普通卸载应用时不会删除该目录
 
 ---
 

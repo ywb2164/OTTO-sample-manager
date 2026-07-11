@@ -40,6 +40,8 @@ win:
       arch:
         - x64
 nsis:
+  guid: f8941786-352c-5c22-bea5-7886c3ac4a8f
+  include: installer.nsh
   oneClick: false
   allowToChangeInstallationDirectory: true
   installerIcon: icon.ico
