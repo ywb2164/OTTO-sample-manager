@@ -26,7 +26,6 @@ files:
   - '!**/{test,tests,__tests__,spec,specs,example,examples,demo,demos,docs,doc,benchmark,benchmarks}/**'
   - '!**/node_modules/**/{test,tests,__tests__,spec,specs,example,examples,demo,demos,docs,doc,benchmark,benchmarks}/**'
   - '!**/node_modules/**/.github/**'
-  - '!**/node_modules/**/src/**'
   - '!**/node_modules/**/.runkit_example.js'
   - '!**/node_modules/**/dist-src/**'
 extraResources:
