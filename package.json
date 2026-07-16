@@ -1,6 +1,6 @@
 {
   "name": "sample-manager",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "鬼畜采样管理工具",
   "author": "ywb2164",
   "license": "MIT",
@@ -21,6 +21,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "tauri:build:release": "tauri build --config src-tauri/tauri.release.conf.json",
+    "tauri:verify:release": "node scripts/verify-tauri-release.mjs --exe src-tauri/target/release/otto-sample-manager.exe --installer src-tauri/target/release/bundle/nsis/采样管理器_2.5.1_x64-setup.exe --expected-version 2.5.1",
     "tauri:renderer:dev": "vite --config vite.tauri.config.ts --host 127.0.0.1 --port 1420",
     "tauri:renderer:build": "vite build --config vite.tauri.config.ts"
   },

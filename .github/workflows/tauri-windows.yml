@@ -45,6 +45,9 @@ jobs:
       - name: Build unsigned-check NSIS package
         run: npm run tauri:build -- --ci
 
+      - name: Enforce release artifact contract
+        run: npm run tauri:verify:release
+
       - name: Enforce installer size target
         shell: pwsh
         run: |

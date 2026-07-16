@@ -1,13 +1,27 @@
-node_modules
-dist
-dist-electron
-release
-out
-src-tauri/target
-src-tauri/gen
-src-tauri/keys/*.key
+# Dependencies
+/node_modules/
+
+# Frontend and Electron build outputs
+/dist/
+/dist-electron/
+/release/
+/out/
+
+# Tauri-generated outputs and local signing keys
+/src-tauri/target/
+/src-tauri/gen/
+/src-tauri/keys/*.key
+
+# Application-managed local sample copies
 /Copy/
+
+# Local environment and tool caches
 .env
+!.env.example
 .DS_Store
 .eslintcache
 *.log*
+
+# Local release and manual-test artifacts
+/._cache_*
+/.tmp-*/
