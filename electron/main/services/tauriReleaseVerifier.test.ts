@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 const verifier = resolve('scripts/verify-tauri-release.mjs')
 const temporaryDirectories: string[] = []
 
-function createFixture(subsystem: number, version = '2.5.1') {
+function createFixture(subsystem: number, version = '2.6.0') {
   const directory = mkdtempSync(join(tmpdir(), 'otto-release-verifier-'))
   temporaryDirectories.push(directory)
 
@@ -98,7 +98,7 @@ describe('Tauri release artifact verifier', () => {
     expect(result.status).toBe(0)
     const report = JSON.parse(result.stdout)
     expect(report).toMatchObject({
-      version: '2.5.1',
+      version: '2.6.0',
       subsystem: 2,
       executablePath: fixture.executablePath,
       installerPath: fixture.installerPath,
