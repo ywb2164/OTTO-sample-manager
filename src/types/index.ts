@@ -19,6 +19,21 @@ export interface Sample {
   isFileValid: boolean    // 文件是否仍然存在
 }
 
+// Compact library identity kept for every SQLite row. Heavy path/audio metadata
+// is loaded into Sample objects only for the bounded set of visible pages.
+export interface SampleSummary {
+  kind: 'sample-summary'
+  id: string
+  fileName: string
+  fileExt: string
+  folderId: string | null
+  groupIds: string[]
+  importedAt: number
+  pageIndex: number
+}
+
+export type SampleListEntry = Sample | SampleSummary
+
 export interface SampleGroup {
   id: string
   name: string

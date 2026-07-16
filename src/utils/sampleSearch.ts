@@ -141,7 +141,7 @@ export function parseSearchQuery(query: string): SearchKeyword[] {
     .map((part) => buildSearchKeyword(part))
 }
 
-function buildSampleSearchIndex(sample: Sample): SampleSearchIndex {
+export function buildSampleSearchIndex(sample: Pick<Sample, 'id' | 'fileName' | 'fileExt'>): SampleSearchIndex {
   const fileNameLower = sample.fileName.toLowerCase()
   const fileNameTokens = buildSearchableTokens(sample.fileName)
   const fileNamePinyinTokens = fileNameTokens.filter(

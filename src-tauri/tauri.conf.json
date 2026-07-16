@@ -1,0 +1,51 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "采样管理器",
+  "version": "2.5.0",
+  "identifier": "com.ywb2164.otto-sample-manager",
+  "build": {
+    "beforeDevCommand": "npm run tauri:renderer:dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run tauri:renderer:build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "采样管理器",
+        "width": 380,
+        "height": 700,
+        "minWidth": 300,
+        "minHeight": 500,
+        "maxWidth": 600,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "backgroundColor": "#0f0f17"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost http://otto-audio.localhost; img-src 'self' data:; media-src 'self' http://otto-audio.localhost otto-audio:; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMyN0MwRTk3QjMzNTNFMTEKUldRUlBqV3psdzU4TW53VEZxZFNCaDlOT3RpdFBJNFBDaGJUMloyZFpTL212N1hvakI0RzlaSVUK",
+      "endpoints": [
+        "https://github.com/ywb2164/OTTO-sample-manager/releases/latest/download/latest.json"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": false,
+    "icon": ["../resources/icon.ico"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "../resources/icon.ico"
+      }
+    }
+  }
+}

@@ -3,6 +3,9 @@ dist
 dist-electron
 release
 out
+src-tauri/target
+src-tauri/gen
+src-tauri/keys/*.key
 /Copy/
 .env
 .DS_Store

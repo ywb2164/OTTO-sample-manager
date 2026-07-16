@@ -17,12 +17,15 @@ import { ImportResultBanner } from '@/components/ImportResultBanner'
 import { useSampleStore } from '@/store/sampleStore'
 import { usePlayerStore } from '@/store/playerStore'
 import { useAudioEngine } from '@/hooks/useAudioEngine'
+import { useSearchWorker } from '@/hooks/useSearch'
+import { useTauriLibraryPersistence } from '@/hooks/useTauriLibraryPersistence'
 import type {
   ImportCandidate,
   ImportFailure,
   ImportSummary,
   Sample,
   SampleFolder,
+  SampleSummary,
   ScannedFolderNode,
   StoredFolderState,
   StoredImportUndoState,
@@ -31,6 +34,9 @@ import type {
 import { reconcileLibraryState } from '@/services/libraryImport'
 import { buildLyricsSourceSampleIndex, planLyricsAssembly } from '@/services/lyricsSampleAssembler'
 import { decodeLyricsText, getDefaultLyricsGroupName, tokenizeLyricsText } from '@/services/lyricsPinyinService'
+import { getDesktopBridge } from '@/services/desktopBridge'
+import type { DesktopBridge, ImportProgress, LibraryBootstrap, LibrarySampleRecord } from '@/services/desktopBridge'
+import { LibraryPageCache } from '@/services/libraryPageCache'
 import type { LyricsMissingItem, LyricToken } from '@/types/lyrics'
 
 function getFileNameParts(filePath: string) {
@@ -92,27 +98,191 @@ function buildStructuredFolders(root: ScannedFolderNode) {
   return { folders, rootFolderIds, importedAt }
 }
 
+function toSample(item: LibrarySampleRecord): Sample {
+  return {
+    id: item.id,
+    fileName: item.fileName,
+    fileExt: item.extension,
+    filePath: item.filePath,
+    folderId: item.folderId,
+    originalId: item.originalId,
+    isCopy: item.isCopy,
+    copyIndex: item.copyIndex,
+    duration: (item.durationMs ?? 0) / 1000,
+    sampleRate: item.sampleRate ?? 0,
+    channels: item.channels ?? 0,
+    fileSize: item.fileSize,
+    groupIds: item.groupIds,
+    importedAt: item.importedAt,
+    isDecoded: false,
+    isFileValid: item.isValid,
+  }
+}
+
+const TAURI_LIBRARY_PAGE_SIZE = 256
+const tauriLibraryPageCache = new LibraryPageCache<Sample>({
+  pageSize: TAURI_LIBRARY_PAGE_SIZE,
+  maxPages: 8,
+})
+let tauriHydrationSequence = 0
+const pendingTauriPages = new Map<number, Promise<void>>()
+
+function syncTauriPageCacheToStore(): void {
+  useSampleStore.getState().replaceCachedSamples(tauriLibraryPageCache.items())
+}
+
+function applyTauriLibrarySnapshot(
+  bootstrap: LibraryBootstrap,
+  summaries: SampleSummary[],
+  cachedSamples: Sample[],
+): void {
+  const restoredFolders = new Map<string, SampleFolder>(bootstrap.folders.map((folder) => [folder.id, {
+    id: folder.id,
+    name: folder.name,
+    path: folder.path,
+    sampleIds: [],
+    childFolderIds: [],
+    parentId: folder.parentId,
+    rootId: folder.rootId,
+    depth: folder.depth,
+    importedAt: folder.importedAt,
+    isExpanded: folder.isExpanded,
+    order: folder.order,
+    isRenaming: false,
+  }]))
+  restoredFolders.forEach((folder) => {
+    if (folder.parentId) restoredFolders.get(folder.parentId)?.childFolderIds.push(folder.id)
+  })
+  summaries.forEach((sample) => {
+    if (sample.folderId) restoredFolders.get(sample.folderId)?.sampleIds.push(sample.id)
+  })
+
+  const restoredGroups = new Map(bootstrap.groups.map((group) => [group.id, {
+    id: group.id,
+    name: group.name,
+    color: group.color,
+    sampleIds: [] as string[],
+  }]))
+  summaries.forEach((sample) => {
+    sample.groupIds.forEach((groupId) => restoredGroups.get(groupId)?.sampleIds.push(sample.id))
+  })
+
+  const storedFolderSettings = bootstrap.settings.folderSettings as Partial<ReturnType<typeof useSampleStore.getState>['folderSettings']> | undefined
+  useSampleStore.setState((state) => ({
+    samples: new Map(cachedSamples.map((sample) => [sample.id, sample])),
+    sampleSummaries: new Map(summaries.map((summary) => [summary.id, summary])),
+    pagedLibrary: true,
+    folders: restoredFolders,
+    folderOrder: bootstrap.folderOrder,
+    groups: restoredGroups,
+    groupOrder: bootstrap.groupOrder,
+    expandedFolderIds: new Set(
+      bootstrap.folders.filter((folder) => folder.isExpanded).map((folder) => folder.id),
+    ),
+    folderSettings: storedFolderSettings
+      ? { ...state.folderSettings, ...storedFolderSettings }
+      : state.folderSettings,
+    lastGroupChangeTimestamp: Date.now(),
+    libraryRevision: state.libraryRevision + 1,
+  }))
+}
+
+async function hydrateTauriLibrary(desktop: DesktopBridge, showFirstPageEarly = false): Promise<void> {
+  const hydrationSequence = ++tauriHydrationSequence
+  const generation = tauriLibraryPageCache.reset()
+  pendingTauriPages.clear()
+  const [bootstrap, firstPage] = await Promise.all([
+    desktop.library.getBootstrap(),
+    desktop.library.queryPage({ offset: 0, limit: TAURI_LIBRARY_PAGE_SIZE }),
+  ])
+  if (hydrationSequence !== tauriHydrationSequence) return
+  const firstSamples = firstPage.items.map(toSample)
+  tauriLibraryPageCache.storePage(0, firstSamples, generation)
+
+  const summaries: SampleSummary[] = []
+  let globalOffset = 0
+  for await (const batch of desktop.library.getSearchIndexBatches(1000)) {
+    if (hydrationSequence !== tauriHydrationSequence) return
+    for (const document of batch.documents) {
+      summaries.push({
+        kind: 'sample-summary',
+        id: document.id,
+        fileName: document.fileName,
+        fileExt: document.extension,
+        folderId: document.folderId,
+        groupIds: document.groupIds,
+        importedAt: document.importedAt,
+        pageIndex: Math.floor(globalOffset / TAURI_LIBRARY_PAGE_SIZE),
+      })
+      globalOffset += 1
+    }
+  }
+  if (hydrationSequence !== tauriHydrationSequence) return
+  applyTauriLibrarySnapshot(bootstrap, summaries, tauriLibraryPageCache.items())
+  if (showFirstPageEarly) {
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
+  }
+}
+
+async function ensureTauriLibraryPage(desktop: DesktopBridge, pageIndex: number): Promise<void> {
+  if (desktop.runtime !== 'tauri' || tauriLibraryPageCache.hasPage(pageIndex)) return
+  const existing = pendingTauriPages.get(pageIndex)
+  if (existing) return existing
+
+  const generation = tauriLibraryPageCache.currentGeneration()
+  const request = desktop.library.queryPage({
+    offset: pageIndex * TAURI_LIBRARY_PAGE_SIZE,
+    limit: TAURI_LIBRARY_PAGE_SIZE,
+  }).then((page) => {
+    if (tauriLibraryPageCache.storePage(pageIndex, page.items.map(toSample), generation)) {
+      syncTauriPageCacheToStore()
+    }
+  }).finally(() => {
+    pendingTauriPages.delete(pageIndex)
+  })
+  pendingTauriPages.set(pageIndex, request)
+  return request
+}
+
 const SelectionBar = React.lazy(() =>
   import('@/components/SelectionBar').then((module) => ({ default: module.SelectionBar }))
 )
 
 export default function App() {
+  const desktop = getDesktopBridge()
+  useSearchWorker()
   const listRef = React.useRef<HTMLDivElement>(null)
   const selectAllRef = React.useRef<HTMLInputElement>(null)
   const groupScrollPositionsRef = React.useRef<Map<string, number>>(new Map())
   const previousGroupScrollKeyRef = React.useRef('__all__')
   const previousSearchQueryRef = React.useRef('')
+  const importTargetGroupIdRef = React.useRef<string | null>(null)
   
-  const {
-    samples, selectedIds,
-    addSamples, addGroup, commitImport, removeAllImported, setDecodeProgress,
-    toggleSelected, clearSelection, selectAll,
-    setAnchorId, setSelected, setActiveGroupId,
-    toggleFolderExpanded, renameFolder, removeFolder, moveFolder, getOrderedIds,
-    folders, folderOrder, expandedFolderIds
-  } = useSampleStore()
+  const samples = useSampleStore((state) => state.samples)
+  const sampleCount = useSampleStore((state) => state.pagedLibrary ? state.sampleSummaries.size : state.samples.size)
+  const selectedIds = useSampleStore((state) => state.selectedIds)
+  const addSamples = useSampleStore((state) => state.addSamples)
+  const addGroup = useSampleStore((state) => state.addGroup)
+  const commitImport = useSampleStore((state) => state.commitImport)
+  const removeAllImported = useSampleStore((state) => state.removeAllImported)
+  const setDecodeProgress = useSampleStore((state) => state.setDecodeProgress)
+  const toggleSelected = useSampleStore((state) => state.toggleSelected)
+  const clearSelection = useSampleStore((state) => state.clearSelection)
+  const selectAll = useSampleStore((state) => state.selectAll)
+  const setAnchorId = useSampleStore((state) => state.setAnchorId)
+  const setSelected = useSampleStore((state) => state.setSelected)
+  const setActiveGroupId = useSampleStore((state) => state.setActiveGroupId)
+  const toggleFolderExpanded = useSampleStore((state) => state.toggleFolderExpanded)
+  const renameFolder = useSampleStore((state) => state.renameFolder)
+  const removeFolder = useSampleStore((state) => state.removeFolder)
+  const moveFolder = useSampleStore((state) => state.moveFolder)
+  const getOrderedIds = useSampleStore((state) => state.getOrderedIds)
+  const folders = useSampleStore((state) => state.folders)
+  const folderOrder = useSampleStore((state) => state.folderOrder)
+  const expandedFolderIds = useSampleStore((state) => state.expandedFolderIds)
 
-  const { currentSampleId, isPlaying } = usePlayerStore()
+  const currentSampleId = usePlayerStore((state) => state.currentSampleId)
+  const isPlaying = usePlayerStore((state) => state.isPlaying)
   const { play, stopPlayback, togglePause, seekTo, getWaveform, beginShutdown } = useAudioEngine()
   const folderSettings = useSampleStore(state => state.folderSettings)
   const groups = useSampleStore(state => state.groups)
@@ -136,6 +306,12 @@ export default function App() {
     action: 'none',
   })
   const [hasHydratedStore, setHasHydratedStore] = useState(false)
+  const [startupError, setStartupError] = useState<string | null>(null)
+  const [libraryWritable, setLibraryWritable] = useState(true)
+  const isLibraryReadOnly = desktop.runtime === 'tauri' && !libraryWritable
+  useTauriLibraryPersistence(hasHydratedStore && desktop.runtime === 'tauri' && libraryWritable)
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null)
+  const [currentImportSession, setCurrentImportSession] = useState<string | null>(null)
   const [showLyricsAssembler, setShowLyricsAssembler] = useState(false)
   const [lyricsFilePath, setLyricsFilePath] = useState('')
   const [lyricsTokens, setLyricsTokens] = useState<LyricToken[]>([])
@@ -149,11 +325,24 @@ export default function App() {
   } | null>(null)
   const closeImportSummary = useCallback(() => setImportSummary(null), [])
   const isUpdateBlocking = updateState.phase === 'downloading' || updateState.phase === 'installing'
+
+  useEffect(() => {
+    const handlePersistenceError = (event: Event) => {
+      const message = (event as CustomEvent<string>).detail
+      setStartupError((current) => [
+        current,
+        `SQLite 增量保存失败；本次未确认的数据仍保留在界面中。\n错误：${message}`,
+      ].filter(Boolean).join('\n\n'))
+    }
+    window.addEventListener('otto:persistence-error', handlePersistenceError)
+    return () => window.removeEventListener('otto:persistence-error', handlePersistenceError)
+  }, [])
+
   const handleCheckForUpdates = useCallback(() => {
-    void window.electronAPI.checkForUpdates({ manual: true }).then(setUpdateState).catch(() => undefined)
+    void desktop.updater.check({ manual: true }).then(setUpdateState).catch(() => undefined)
   }, [])
   const handleStartUpdate = useCallback(() => {
-    void window.electronAPI.startUpdate().catch(() => undefined)
+    void desktop.updater.start().catch(() => undefined)
   }, [])
   const handleListContextMenu = useCallback((event: React.MouseEvent) => {
     event.preventDefault()
@@ -192,11 +381,44 @@ export default function App() {
     getItemKey: (index) => {
       const item = flattenedItems[index]
       if (!item) return `missing-${index}`
-      return 'filePath' in item ? `sample-${item.id}` : `folder-${item.id}`
+      return 'path' in item ? `folder-${item.id}` : `sample-${item.id}`
     },
     estimateSize: () => 44,
     overscan: 10,
   })
+  const virtualItems = virtualizer.getVirtualItems()
+  const memoryOptimizationMode = useSampleStore((state) => state.folderSettings.memoryOptimizationMode)
+  const anchorId = useSampleStore((state) => state.anchorId)
+  const visiblePageKey = virtualItems
+    .map((row) => {
+      const item = flattenedItems[row.index]
+      return item && 'kind' in item && item.kind === 'sample-summary' ? item.pageIndex : -1
+    })
+    .filter((pageIndex) => pageIndex >= 0)
+    .join(',')
+
+  useEffect(() => {
+    if (desktop.runtime !== 'tauri') return
+    tauriLibraryPageCache.setMaxPages(memoryOptimizationMode ? 3 : 8)
+    tauriLibraryPageCache.setPinnedIds(new Set([
+      ...selectedIds,
+      ...(currentSampleId ? [currentSampleId] : []),
+      ...(anchorId ? [anchorId] : []),
+    ]))
+
+    const visiblePages = visiblePageKey
+      .split(',')
+      .map(Number)
+      .filter((pageIndex) => Number.isInteger(pageIndex) && pageIndex >= 0)
+    const pagesToLoad = new Set<number>()
+    for (const pageIndex of visiblePages) {
+      pagesToLoad.add(pageIndex)
+      if (pageIndex > 0) pagesToLoad.add(pageIndex - 1)
+      pagesToLoad.add(pageIndex + 1)
+    }
+    void Promise.all([...pagesToLoad].map((pageIndex) => ensureTauriLibraryPage(desktop, pageIndex)))
+    syncTauriPageCacheToStore()
+  }, [anchorId, currentSampleId, desktop, memoryOptimizationMode, selectedIds, visiblePageKey])
 
   useEffect(() => {
     const previousGroupKey = previousGroupScrollKeyRef.current
@@ -234,12 +456,22 @@ export default function App() {
 
   useEffect(() => {
     const hydrateStore = async () => {
-      const storedSamples = await window.electronAPI.storeGet('samples') as Record<string, any> | null
-      const storedFolderState = await window.electronAPI.storeGet('folderState') as StoredFolderState | null
-      const storedSettings = await window.electronAPI.storeGet('folderSettings') as any
-      const storedGroups = await window.electronAPI.storeGet('groups') as Record<string, any> | null
-      const storedGroupOrder = await window.electronAPI.storeGet('groupOrder') as string[] | null
-      const storedImportUndoState = await window.electronAPI.storeGet('importUndoState') as StoredImportUndoState | null
+      if (desktop.runtime === 'tauri') {
+        const status = await desktop.startup.getStatus()
+        setStartupError(status.error)
+        setLibraryWritable(status.writable)
+        await hydrateTauriLibrary(desktop, true)
+        setHasHydratedStore(true)
+        return
+      }
+      const legacyStorage = desktop.legacyStorage
+      if (!legacyStorage) throw new Error('Electron legacy storage is unavailable')
+      const storedSamples = await legacyStorage.get('samples') as Record<string, any> | null
+      const storedFolderState = await legacyStorage.get('folderState') as StoredFolderState | null
+      const storedSettings = await legacyStorage.get('folderSettings') as any
+      const storedGroups = await legacyStorage.get('groups') as Record<string, any> | null
+      const storedGroupOrder = await legacyStorage.get('groupOrder') as string[] | null
+      const storedImportUndoState = await legacyStorage.get('importUndoState') as StoredImportUndoState | null
 
       if (storedSettings) {
         const {
@@ -275,7 +507,7 @@ export default function App() {
 
       // 验证文件是否仍然存在
       const validationResult = sampleList.length > 0
-        ? await window.electronAPI.validateFiles(sampleList.map(s => s.filePath))
+        ? await desktop.library.validateFiles(sampleList.map(s => s.filePath))
         : []
       
       const validationMap = new Map<string, boolean>(validationResult.map((r: any) => [r.path, r.valid]))
@@ -328,14 +560,69 @@ export default function App() {
     })
   }, [setDecodeProgress])
 
+  useEffect(() => desktop.library.onImportProgress((progress) => {
+    setImportProgress(progress)
+    setDecodeProgress({ current: progress.processed, total: Math.max(progress.discovered, progress.processed) })
+    if (progress.state === 'scanning') return
+
+    setCurrentImportSession(null)
+    useSampleStore.getState().setIsImporting(false)
+    setDecodeProgress(null)
+    const targetGroupId = importTargetGroupIdRef.current
+    importTargetGroupIdRef.current = null
+    void hydrateTauriLibrary(desktop).then(() => {
+      if (progress.state === 'committed') {
+        setImportSummary({
+          scanned: progress.discovered,
+          added: progress.added,
+          linkedToGroup: progress.linkedToGroup,
+          skipped: progress.duplicates,
+          failed: progress.failed,
+          targetGroupId,
+          failures: progress.message ? [{ path: progress.currentPath ?? 'library', stage: 'commit', reason: progress.message }] : [],
+        })
+        return
+      }
+      const reason = progress.state === 'cancelled'
+        ? '用户已取消导入，未提交的记录已清理'
+        : progress.message ?? '后台导入失败，未提交的记录已清理'
+      setImportSummary({
+        scanned: progress.discovered,
+        added: 0,
+        linkedToGroup: 0,
+        skipped: progress.duplicates,
+        failed: Math.max(1, progress.failed),
+        targetGroupId,
+        failures: [{ path: progress.currentPath ?? 'library', stage: 'commit', reason }],
+      })
+    }).catch((error) => {
+      setImportSummary({
+        scanned: progress.discovered,
+        added: 0,
+        linkedToGroup: 0,
+        skipped: progress.duplicates,
+        failed: Math.max(1, progress.failed),
+        targetGroupId,
+        failures: [{ path: 'library', stage: 'commit', reason: `刷新素材库失败：${String(error)}` }],
+      })
+    })
+  }), [setDecodeProgress])
+
+  useEffect(() => {
+    if (desktop.runtime !== 'tauri') return
+    const refreshLibrary = () => { void hydrateTauriLibrary(desktop) }
+    window.addEventListener('otto:library-changed', refreshLibrary)
+    return () => window.removeEventListener('otto:library-changed', refreshLibrary)
+  }, [])
+
   useEffect(() => {
     let disposed = false
-    window.electronAPI.getUpdateState()
+    desktop.updater.getState()
       .then((state) => {
         if (!disposed) setUpdateState(state)
       })
       .catch(() => undefined)
-    const unsubscribe = window.electronAPI.onUpdateState((state) => {
+    const unsubscribe = desktop.updater.onState((state) => {
       if (!disposed) setUpdateState(state)
     })
     return () => {
@@ -358,7 +645,7 @@ export default function App() {
   }, [beginShutdown, setDecodeProgress])
 
   useEffect(() => {
-    if (!hasHydratedStore) {
+    if (!hasHydratedStore || desktop.runtime === 'tauri') {
       return
     }
 
@@ -371,13 +658,13 @@ export default function App() {
       }
     }
 
-    window.electronAPI.storeSet('samples', samplesToSave).catch((error) => {
+    desktop.legacyStorage?.set('samples', samplesToSave).catch((error) => {
       console.error('保存 samples 失败', error)
     })
   }, [hasHydratedStore, samples])
 
   useEffect(() => {
-    if (!hasHydratedStore) {
+    if (!hasHydratedStore || desktop.runtime === 'tauri') {
       return
     }
 
@@ -390,13 +677,13 @@ export default function App() {
       folderState.folders[id] = folder
     }
 
-    window.electronAPI.storeSet('folderState', folderState).catch((error) => {
+    desktop.legacyStorage?.set('folderState', folderState).catch((error) => {
       console.error('保存 folderState 失败', error)
     })
   }, [folders, folderOrder, hasHydratedStore])
 
   useEffect(() => {
-    if (!hasHydratedStore) {
+    if (!hasHydratedStore || desktop.runtime === 'tauri') {
       return
     }
 
@@ -404,39 +691,39 @@ export default function App() {
     for (const [id, group] of groups) {
       groupsToSave[id] = group
     }
-    window.electronAPI.storeSet('groups', groupsToSave).catch((error) => {
+    desktop.legacyStorage?.set('groups', groupsToSave).catch((error) => {
       console.error('保存 groups 失败', error)
     })
   }, [groups, hasHydratedStore])
 
   useEffect(() => {
-    if (!hasHydratedStore) {
+    if (!hasHydratedStore || desktop.runtime === 'tauri') {
       return
     }
 
-    window.electronAPI.storeSet('groupOrder', groupOrder).catch((error) => {
+    desktop.legacyStorage?.set('groupOrder', groupOrder).catch((error) => {
       console.error('保存 groupOrder 失败', error)
     })
   }, [groupOrder, hasHydratedStore])
 
   useEffect(() => {
-    if (!hasHydratedStore) {
+    if (!hasHydratedStore || desktop.runtime === 'tauri') {
       return
     }
 
-    window.electronAPI.storeSet('folderSettings', folderSettings).catch((error) => {
+    desktop.legacyStorage?.set('folderSettings', folderSettings).catch((error) => {
       console.error('保存 folderSettings 失败', error)
     })
   }, [folderSettings, hasHydratedStore])
 
   useEffect(() => {
-    if (!hasHydratedStore) return
+    if (!hasHydratedStore || desktop.runtime === 'tauri') return
     const { libraryRevision, lastImportUndo } = useSampleStore.getState()
     const importUndoState: StoredImportUndoState = {
       libraryRevision,
       receipt: lastImportUndo,
     }
-    window.electronAPI.storeSet('importUndoState', importUndoState).catch((error) => {
+    desktop.legacyStorage?.set('importUndoState', importUndoState).catch((error) => {
       console.error('保存 importUndoState 失败', error)
     })
   }, [hasHydratedStore, libraryRevision, lastImportUndo])
@@ -449,6 +736,20 @@ export default function App() {
     stopPlayback({ resetTime: true, clearSample: true })
     setCurrentWaveform(null)
   }, [currentSampleId, samples, stopPlayback])
+
+  useEffect(() => {
+    const handleWaveformReady = (event: Event) => {
+      const { sampleId, waveform } = (event as CustomEvent<{
+        sampleId: string
+        waveform: Float32Array
+      }>).detail
+      if (usePlayerStore.getState().currentSampleId === sampleId) {
+        setCurrentWaveform(waveform)
+      }
+    }
+    window.addEventListener('otto:waveform-ready', handleWaveformReady)
+    return () => window.removeEventListener('otto:waveform-ready', handleWaveformReady)
+  }, [])
 
   // ------------------------------
   // 导入文件
@@ -480,7 +781,7 @@ export default function App() {
 
     try {
       const fileInfoByPath = new Map(
-        (await window.electronAPI.getFilesInfo(filePaths)).map((fileInfo) => [fileInfo.path, fileInfo]),
+        (await desktop.library.getFilesInfo(filePaths)).map((fileInfo) => [fileInfo.path, fileInfo]),
       )
       for (const [index, filePath] of filePaths.entries()) {
         try {
@@ -556,18 +857,31 @@ export default function App() {
   }, [commitImport, isUpdateBlocking, setDecodeProgress])
 
   const handleImportFiles = useCallback(async () => {
-    if (isUpdateBlocking || useSampleStore.getState().isImporting) return
+    if (isUpdateBlocking || isLibraryReadOnly || useSampleStore.getState().isImporting) return
     useSampleStore.getState().setIsImporting(true)
+    let startedTauriImport = false
 
     try {
-      const paths = await window.electronAPI.openFileDialog()
+      const paths = await desktop.dialogs.openFiles()
       if (paths.length === 0) return
+      if (desktop.runtime === 'tauri') {
+        const targetGroupId = useSampleStore.getState().activeGroupId
+        importTargetGroupIdRef.current = targetGroupId
+        const sessionId = await desktop.library.startImport({
+          filePaths: paths,
+          targetGroupId,
+        })
+        startedTauriImport = true
+        setCurrentImportSession(sessionId)
+        return
+      }
       await runImport({
         filePaths: paths,
         scannedFileCount: paths.length,
         lockAlreadyHeld: true,
       })
     } catch (error) {
+      importTargetGroupIdRef.current = null
       const failure: ImportFailure = {
         path: '文件选择',
         stage: 'scan',
@@ -583,19 +897,33 @@ export default function App() {
         failures: [failure],
       })
     } finally {
-      useSampleStore.getState().setIsImporting(false)
+      if (desktop.runtime !== 'tauri' || !startedTauriImport) {
+        useSampleStore.getState().setIsImporting(false)
+      }
     }
-  }, [isUpdateBlocking, runImport])
+  }, [isLibraryReadOnly, isUpdateBlocking, runImport])
 
   const handleImportFolder = useCallback(async () => {
-    if (isUpdateBlocking || useSampleStore.getState().isImporting) return
+    if (isUpdateBlocking || isLibraryReadOnly || useSampleStore.getState().isImporting) return
     useSampleStore.getState().setIsImporting(true)
     let selectedFolder: string | null = null
+    let startedTauriImport = false
 
     try {
-      selectedFolder = await window.electronAPI.openFolderDialog()
+      selectedFolder = await desktop.dialogs.openFolder()
       if (!selectedFolder) return
-      const scanResult = await window.electronAPI.scanFolder(selectedFolder)
+      if (desktop.runtime === 'tauri') {
+        const targetGroupId = useSampleStore.getState().activeGroupId
+        importTargetGroupIdRef.current = targetGroupId
+        const sessionId = await desktop.library.startImport({
+          rootPath: selectedFolder,
+          targetGroupId,
+        })
+        startedTauriImport = true
+        setCurrentImportSession(sessionId)
+        return
+      }
+      const scanResult = await desktop.library.scanFolder(selectedFolder)
 
       const collectFiles = (node: ScannedFolderNode): string[] => [
         ...node.files,
@@ -622,6 +950,7 @@ export default function App() {
         lockAlreadyHeld: true,
       })
     } catch (error) {
+      importTargetGroupIdRef.current = null
       const failure: ImportFailure = {
         path: selectedFolder ?? '文件夹选择',
         stage: 'scan',
@@ -637,12 +966,14 @@ export default function App() {
         failures: [failure],
       })
     } finally {
-      useSampleStore.getState().setIsImporting(false)
+      if (desktop.runtime !== 'tauri' || !startedTauriImport) {
+        useSampleStore.getState().setIsImporting(false)
+      }
     }
-  }, [isUpdateBlocking, runImport])
+  }, [isLibraryReadOnly, isUpdateBlocking, runImport])
 
   const handleRemoveAllImported = useCallback(() => {
-    if (isUpdateBlocking) return
+    if (isUpdateBlocking || isLibraryReadOnly) return
     const confirmed = window.confirm('确定移除当前导入的全部文件夹和素材吗？\n这不会删除磁盘上的原始文件。')
     if (!confirmed) return
 
@@ -656,10 +987,10 @@ export default function App() {
     playerStore.setIsPlaying(false)
     playerStore.setCurrentTime(0)
     playerStore.setDuration(0)
-    window.electronAPI.storeDelete('folderState').catch((error) => {
+    desktop.legacyStorage?.delete('folderState').catch((error) => {
       console.error('删除 folderState 失败', error)
     })
-  }, [isUpdateBlocking, removeAllImported, stopPlayback])
+  }, [isLibraryReadOnly, isUpdateBlocking, removeAllImported, stopPlayback])
 
   const resetLyricsAssemblerState = useCallback(() => {
     setLyricsFilePath('')
@@ -671,9 +1002,10 @@ export default function App() {
   }, [])
 
   const handleOpenLyricsAssembler = useCallback(() => {
+    if (isLibraryReadOnly) return
     resetLyricsAssemblerState()
     setShowLyricsAssembler(true)
-  }, [resetLyricsAssemblerState])
+  }, [isLibraryReadOnly, resetLyricsAssemblerState])
 
   const handleCloseLyricsAssembler = useCallback(() => {
     if (isAssemblingLyrics) return
@@ -681,10 +1013,10 @@ export default function App() {
   }, [isAssemblingLyrics])
 
   const handlePickLyricsFile = useCallback(async () => {
-    const filePath = await window.electronAPI.openLyricsFileDialog()
+    const filePath = await desktop.dialogs.openLyricsFile()
     if (!filePath) return
 
-    const buffer = await window.electronAPI.readFileAsBuffer(filePath)
+    const buffer = await desktop.files.readAsBuffer(filePath)
     const text = decodeLyricsText(buffer)
     const tokens = tokenizeLyricsText(text)
 
@@ -695,7 +1027,7 @@ export default function App() {
   }, [])
 
   const handleAssembleLyrics = useCallback(async () => {
-    if (!lyricsFilePath || !lyricsSourceGroupId || !lyricsTargetGroupName.trim() || isAssemblingLyrics || isUpdateBlocking) {
+    if (!lyricsFilePath || !lyricsSourceGroupId || !lyricsTargetGroupName.trim() || isAssemblingLyrics || isUpdateBlocking || isLibraryReadOnly) {
       return
     }
 
@@ -731,7 +1063,7 @@ export default function App() {
         return
       }
 
-      const copyResult = await window.electronAPI.createLyricsFiles({
+      const copyResult = await desktop.files.createLyricsFiles({
         targetGroupName: lyricsTargetGroupName.trim(),
         items: plan.matched.map((item) => ({
           id: item.id,
@@ -807,12 +1139,12 @@ export default function App() {
     } finally {
       setIsAssemblingLyrics(false)
     }
-  }, [addGroup, addSamples, groups, isAssemblingLyrics, isUpdateBlocking, lyricsFilePath, lyricsSourceGroupId, lyricsTargetGroupName, lyricsTokens, resetLyricsAssemblerState, samples, setActiveGroupId])
+  }, [addGroup, addSamples, groups, isAssemblingLyrics, isLibraryReadOnly, isUpdateBlocking, lyricsFilePath, lyricsSourceGroupId, lyricsTargetGroupName, lyricsTokens, resetLyricsAssemblerState, samples, setActiveGroupId])
 
   // 拖文件到窗口导入
   const handleWindowDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
-    if (isUpdateBlocking || useSampleStore.getState().isImporting) return
+    if (isUpdateBlocking || isLibraryReadOnly || useSampleStore.getState().isImporting) return
     const paths = Array.from(e.dataTransfer.files)
       // @ts-ignore - File in Electron environment has a path property
       .map((f: any) => (f as any).path)
@@ -820,7 +1152,46 @@ export default function App() {
     if (paths.length > 0) {
       void runImport({ filePaths: paths, scannedFileCount: paths.length })
     }
-  }, [isUpdateBlocking, runImport])
+  }, [isLibraryReadOnly, isUpdateBlocking, runImport])
+
+  useEffect(() => desktop.window.onFilesDropped((droppedPaths) => {
+    if (desktop.runtime !== 'tauri' || isUpdateBlocking || isLibraryReadOnly || useSampleStore.getState().isImporting) return
+    const filePaths = droppedPaths.filter((path) => /\.(wav|mp3|ogg|flac|aiff?|m4a)$/i.test(path))
+    if (!filePaths.length) return
+    useSampleStore.getState().setIsImporting(true)
+    const targetGroupId = useSampleStore.getState().activeGroupId
+    importTargetGroupIdRef.current = targetGroupId
+    void desktop.library.startImport({
+      filePaths,
+      targetGroupId,
+    }).then((sessionId) => {
+      setCurrentImportSession(sessionId)
+      setImportProgress({
+        sessionId,
+        state: 'scanning',
+        discovered: 0,
+        processed: 0,
+        added: 0,
+        duplicates: 0,
+        linkedToGroup: 0,
+        failed: 0,
+        currentPath: null,
+        message: null,
+      })
+    }).catch((error) => {
+      importTargetGroupIdRef.current = null
+      useSampleStore.getState().setIsImporting(false)
+      setImportSummary({
+        scanned: filePaths.length,
+        added: 0,
+        linkedToGroup: 0,
+        skipped: 0,
+        failed: filePaths.length,
+        targetGroupId,
+        failures: [{ path: '拖入文件', stage: 'commit', reason: String(error) }],
+      })
+    })
+  }), [desktop, isLibraryReadOnly, isUpdateBlocking])
 
   // ------------------------------
   // 文件夹操作
@@ -896,12 +1267,22 @@ export default function App() {
   }, [getWaveform, play, togglePause])
 
   const handlePrimaryPlaybackAction = useCallback(async () => {
-    const targetSample = (() => {
+    let targetSample = (() => {
       const { selectedIds, samples } = useSampleStore.getState()
       const targetId = selectedIds.values().next().value as string | undefined
       if (!targetId) return null
       return samples.get(targetId) ?? null
     })()
+
+    if (!targetSample && desktop.runtime === 'tauri') {
+      const state = useSampleStore.getState()
+      const targetId = state.selectedIds.values().next().value as string | undefined
+      const summary = targetId ? state.sampleSummaries.get(targetId) : null
+      if (summary) {
+        await ensureTauriLibraryPage(desktop, summary.pageIndex)
+        targetSample = useSampleStore.getState().samples.get(summary.id) ?? null
+      }
+    }
 
     if (!targetSample || !targetSample.isFileValid) {
       return
@@ -932,7 +1313,30 @@ export default function App() {
     if (cachedWaveform) {
       setCurrentWaveform(cachedWaveform)
     }
-  }, [getWaveform, play, togglePause])
+  }, [desktop, getWaveform, play, togglePause])
+
+  const handleSampleSelect = useCallback((id: string, event: React.MouseEvent) => {
+    if (event.ctrlKey || event.metaKey) {
+      toggleSelected(id)
+    } else if (event.shiftKey) {
+      const { anchorId, getOrderedIds, selectRange } = useSampleStore.getState()
+      if (anchorId) selectRange(anchorId, id, getOrderedIds())
+    } else {
+      setSelected(new Set([id]))
+      setAnchorId(id)
+    }
+  }, [setAnchorId, setSelected, toggleSelected])
+
+  useEffect(() => {
+    const previewActive = () => { void handlePrimaryPlaybackAction() }
+    const focusList = () => listRef.current?.focus()
+    window.addEventListener('otto:preview-active', previewActive)
+    window.addEventListener('otto:focus-list', focusList)
+    return () => {
+      window.removeEventListener('otto:preview-active', previewActive)
+      window.removeEventListener('otto:focus-list', focusList)
+    }
+  }, [handlePrimaryPlaybackAction])
 
   const handleSeek = useCallback((time: number) => {
     const { currentSampleId, currentFilePath } = usePlayerStore.getState()
@@ -971,11 +1375,25 @@ export default function App() {
         onImportFolder={handleImportFolder}
         onAssembleLyrics={handleOpenLyricsAssembler}
         onRemoveAllImported={handleRemoveAllImported}
-        isImporting={isImporting || isUpdateBlocking}
+        isImporting={isImporting || isUpdateBlocking || isLibraryReadOnly}
         updateState={updateState}
         onCheckForUpdates={handleCheckForUpdates}
         onStartUpdate={handleStartUpdate}
       />
+
+      {startupError && (
+        <div className="border-b border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-100">
+          <div className="flex items-start justify-between gap-3">
+            <span className="whitespace-pre-wrap">{startupError}</span>
+            <button
+              className="flex-shrink-0 rounded bg-white/10 px-2 py-1 hover:bg-white/15"
+              onClick={() => { void navigator.clipboard.writeText(startupError) }}
+            >
+              复制错误
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 搜索栏 */}
       <SearchBar />
@@ -996,7 +1414,7 @@ export default function App() {
       {lastUndoSummary && (
         <div className="flex items-center justify-between border-b border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
           <span>
-            已移除新增 {lastUndoSummary.removedSamples} 条、解除归组 {lastUndoSummary.removedGroupLinks} 条、恢复目录 {lastUndoSummary.restoredFolders} 个
+            已移除新增 {lastUndoSummary.removedSamples} 条、解除归组 {lastUndoSummary.removedGroupLinks} 条、处理目录 {lastUndoSummary.restoredFolders} 个
           </span>
           <button
             className="rounded p-1 hover:bg-white/10"
@@ -1008,7 +1426,7 @@ export default function App() {
         </div>
       )}
 
-      {samples.size > 0 && (
+      {sampleCount > 0 && (
         <div className="border-b border-white/5 bg-zinc-950 px-3 py-2">
           <label className="flex w-fit cursor-pointer items-center gap-2 rounded-md border border-white/5 bg-transparent px-2.5 py-1.5 text-xs text-zinc-300 transition-colors hover:bg-white/[0.035] hover:text-zinc-100">
             <input
@@ -1032,6 +1450,7 @@ export default function App() {
       )}
       <div
         ref={listRef}
+        tabIndex={-1}
         className="h-full overflow-y-auto overflow-x-hidden"
         style={{ contain: 'strict' }}
         onContextMenu={handleListContextMenu}
@@ -1042,7 +1461,7 @@ export default function App() {
               <Music2 size={24} />
             </div>
             <div className="text-sm text-zinc-300">
-              {samples.size === 0
+              {sampleCount === 0
                 ? '拖入音频文件或点击导入按钮'
                 : '没有匹配的采样'}
             </div>
@@ -1052,10 +1471,11 @@ export default function App() {
             key={listResetKey}
             style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}
           >
-            {virtualizer.getVirtualItems().map(virtualRow => {
+            {virtualItems.map(virtualRow => {
               const item = flattenedItems[virtualRow.index]
               const isFolder = 'path' in item // SampleFolder has path property
               const isSample = 'filePath' in item // Sample has filePath property
+              const isSummary = 'kind' in item && item.kind === 'sample-summary'
 
               return (
                 <div
@@ -1086,20 +1506,20 @@ export default function App() {
                       isSelected={selectedIds.has(item.id)}
                       isPlaying={currentSampleId === item.id && isPlaying}
                       onPlay={handlePlay}
-                      onSelect={(id, e) => {
-                        if (e.ctrlKey || e.metaKey) {
-                          toggleSelected(id)
-                        } else if (e.shiftKey) {
-                          const { anchorId, getOrderedIds, selectRange } = useSampleStore.getState()
-                          if (anchorId) {
-                            selectRange(anchorId, id, getOrderedIds())
-                          }
-                        } else {
-                          setSelected(new Set([id]))
-                          setAnchorId(id)
-                        }
-                      }}
+                      onSelect={handleSampleSelect}
                     />
+                  ) : isSummary ? (
+                    <div
+                      className="flex h-11 items-center gap-2 border-b border-white/5 px-3 text-sm text-zinc-400"
+                      style={{ paddingLeft: '28px' }}
+                      aria-label={`正在加载 ${item.fileName}${item.fileExt}`}
+                    >
+                      <Loader2 size={13} className="animate-spin text-zinc-500" />
+                      <span className="min-w-0 flex-1 truncate">
+                        <span className="font-medium text-zinc-300">{item.fileName}</span>
+                        <span className="ml-0.5 text-xs">{item.fileExt}</span>
+                      </span>
+                    </div>
                   ) : null}
                 </div>
               )
@@ -1108,13 +1528,25 @@ export default function App() {
         )}
       </div>
       {isImporting && (
-        <div className="pointer-events-auto absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/70 backdrop-blur-sm">
-          <div className="flex items-center gap-3 rounded-lg border border-white/5 bg-zinc-950/95 px-4 py-3 shadow-lg shadow-black/30 backdrop-blur-xl">
+        <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 flex justify-center">
+          <div className="pointer-events-auto flex min-w-64 items-center gap-3 rounded-lg border border-white/5 bg-zinc-950/95 px-4 py-3 shadow-lg shadow-black/30 backdrop-blur-xl">
             <Loader2 size={20} className="animate-spin text-blue-400" />
-            <div className="flex flex-col">
-              <span className="text-sm text-text-primary">入飞门中...</span>
-              <span className="text-xs text-text-dim">飞马正在8bc, 别急</span>
+            <div className="flex min-w-0 flex-1 flex-col">
+              <span className="text-sm text-text-primary">正在后台导入</span>
+              <span className="truncate text-xs text-text-dim">
+                {importProgress
+                  ? `已处理 ${importProgress.processed} · 新增 ${importProgress.added} · 归组 ${importProgress.linkedToGroup} · 重复 ${importProgress.duplicates}`
+                  : '正在准备导入任务…'}
+              </span>
             </div>
+            {currentImportSession && (
+              <button
+                className="rounded-md border border-white/10 px-2 py-1 text-xs text-text-secondary hover:bg-white/5"
+                onClick={() => void desktop.library.cancelImport(currentImportSession)}
+              >
+                取消
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1221,7 +1653,7 @@ export default function App() {
               <button
                 className="inline-flex h-8 items-center gap-1.5 rounded-md bg-accent-primary px-3 text-xs font-medium text-white transition-colors hover:bg-accent-light disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={handleAssembleLyrics}
-                disabled={isUpdateBlocking || isAssemblingLyrics || !lyricsFilePath || !lyricsSourceGroupId || !lyricsTargetGroupName.trim()}
+                disabled={isUpdateBlocking || isLibraryReadOnly || isAssemblingLyrics || !lyricsFilePath || !lyricsSourceGroupId || !lyricsTargetGroupName.trim()}
               >
                 {isAssemblingLyrics && <Loader2 size={14} className="animate-spin" />}
                 <span>{isAssemblingLyrics ? '生成中...' : '开始生成'}</span>

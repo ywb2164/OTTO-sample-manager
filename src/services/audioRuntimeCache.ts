@@ -18,10 +18,10 @@ export type AudioRuntimeCacheStats = {
   waveform: RuntimeCacheStats
 }
 
-const AUDIO_BUFFER_CACHE_LIMIT_BYTES = 200 * 1024 * 1024
-const WAVEFORM_CACHE_LIMIT_BYTES = 50 * 1024 * 1024
-const OPTIMIZED_AUDIO_BUFFER_CACHE_LIMIT_BYTES = 64 * 1024 * 1024
-const OPTIMIZED_WAVEFORM_CACHE_LIMIT_BYTES = 8 * 1024 * 1024
+const AUDIO_BUFFER_CACHE_LIMIT_BYTES = 64 * 1024 * 1024
+const WAVEFORM_CACHE_LIMIT_BYTES = 8 * 1024 * 1024
+const OPTIMIZED_AUDIO_BUFFER_CACHE_LIMIT_BYTES = 16 * 1024 * 1024
+const OPTIMIZED_WAVEFORM_CACHE_LIMIT_BYTES = 4 * 1024 * 1024
 const isDev = import.meta.env.DEV
 
 class ByteLimitedRuntimeCache<K, V> {
@@ -225,7 +225,8 @@ export const audioRuntimeCache = {
     pendingDecodePromises.set(sampleId, promise)
   },
 
-  clearPendingDecode(sampleId: string): void {
+  clearPendingDecode(sampleId: string, expected?: Promise<AudioBuffer | null>): void {
+    if (expected && pendingDecodePromises.get(sampleId) !== expected) return
     pendingDecodePromises.delete(sampleId)
   },
 
@@ -237,7 +238,8 @@ export const audioRuntimeCache = {
     pendingWaveformPromises.set(sampleId, promise)
   },
 
-  clearPendingWaveform(sampleId: string): void {
+  clearPendingWaveform(sampleId: string, expected?: Promise<Float32Array | null>): void {
+    if (expected && pendingWaveformPromises.get(sampleId) !== expected) return
     pendingWaveformPromises.delete(sampleId)
   },
 

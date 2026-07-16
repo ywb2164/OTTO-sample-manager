@@ -14,7 +14,7 @@ interface Props {
   onDrop: (e: React.DragEvent, folderId: string) => void
 }
 
-export const FolderItem: React.FC<Props> = ({
+const FolderItemComponent: React.FC<Props> = ({
   folder,
   isExpanded,
   onToggle,
@@ -34,11 +34,9 @@ export const FolderItem: React.FC<Props> = ({
 
   const openContextMenu = useSampleStore((state) => state.openContextMenu)
   const setSelected = useSampleStore((state) => state.setSelected)
-  const selectedIds = useSampleStore((state) => state.selectedIds)
   const isHidden = useSampleStore((state) => state.hiddenFolderIds.has(folder.id))
   const sampleCount = useSampleStore((state) => state.getFolderSampleCount(folder.id))
   const selectedCount = useSampleStore((state) => state.getFolderSelectedCount(folder.id))
-  const folderSampleIds = useSampleStore((state) => state.getFolderSampleIds(folder.id))
 
   // 双击进入重命名模式
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
@@ -176,7 +174,9 @@ export const FolderItem: React.FC<Props> = ({
   const handleCheckboxChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation()
 
-    const nextSelectedIds = new Set(selectedIds)
+    const state = useSampleStore.getState()
+    const folderSampleIds = state.getFolderSampleIds(folder.id)
+    const nextSelectedIds = new Set(state.selectedIds)
     if (isChecked) {
       folderSampleIds.forEach(id => nextSelectedIds.delete(id))
     } else {
@@ -184,7 +184,7 @@ export const FolderItem: React.FC<Props> = ({
     }
 
     setSelected(nextSelectedIds)
-  }, [folderSampleIds, isChecked, selectedIds, setSelected])
+  }, [folder.id, isChecked, setSelected])
 
   return (
     <div
@@ -267,3 +267,5 @@ export const FolderItem: React.FC<Props> = ({
     </div>
   )
 }
+
+export const FolderItem = React.memo(FolderItemComponent)

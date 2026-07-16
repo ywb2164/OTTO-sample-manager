@@ -25,8 +25,11 @@ const WaveformPlaceholder: React.FC = () => (
 )
 
 export const StatusBar: React.FC<Props> = ({ waveformData, onSeek, onPrimaryAction, canControl, isPrimaryPlaying }) => {
-  const { currentSampleId, currentTime, duration } = usePlayerStore()
-  const { samples, selectedIds } = useSampleStore()
+  const currentSampleId = usePlayerStore((state) => state.currentSampleId)
+  const currentTime = usePlayerStore((state) => state.currentTime)
+  const duration = usePlayerStore((state) => state.duration)
+  const samples = useSampleStore((state) => state.samples)
+  const selectedIds = useSampleStore((state) => state.selectedIds)
   const progressBarRef = useRef<HTMLDivElement>(null)
   const suppressClickRef = useRef(false)
   const [isDraggingProgress, setIsDraggingProgress] = useState(false)
@@ -115,11 +118,6 @@ export const StatusBar: React.FC<Props> = ({ waveformData, onSeek, onPrimaryActi
   const sampleRateLabel = displaySample && displaySample.sampleRate > 0
     ? `${displaySample.sampleRate / 1000}kHz`
     : '--'
-  /*
-  const channelLabel = displaySample && displaySample.channels > 0
-    ? (displaySample.channels === 1 ? '鍗曞０閬? : '绔嬩綋澹?')
-    : '--'
-  */
   const channelLabel = displaySample && displaySample.channels > 0
     ? (displaySample.channels === 1 ? 'Mono' : 'Stereo')
     : '--'

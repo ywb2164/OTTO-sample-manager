@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { useSampleStore } from '@/store/sampleStore'
 import type { UpdateState } from '@/types'
+import { getDesktopBridge } from '@/services/desktopBridge'
 import appIconUrl from '../../tmp-app-icon.png'
 
 interface Props {
@@ -39,6 +40,7 @@ export const TitleBar: React.FC<Props> = ({
   onCheckForUpdates,
   onStartUpdate,
 }) => {
+  const desktop = getDesktopBridge()
   const [alwaysOnTop, setAlwaysOnTop] = useState(true)
   const [opacity, setOpacity] = useState(1.0)
   const [appVersion, setAppVersion] = useState('')
@@ -46,29 +48,25 @@ export const TitleBar: React.FC<Props> = ({
   const [keepCopies, setKeepCopies] = useState(false)
   const [showImportMenu, setShowImportMenu] = useState(false)
   const [showSettingsMenu, setShowSettingsMenu] = useState(false)
-  const {
-    folderSettings,
-    setExpandOnSearch,
-    setFolderClassificationEnabled,
-    setMemoryOptimizationMode,
-    setEnableChinesePinyinFuzzySearch,
-  } = useSampleStore()
+  const folderSettings = useSampleStore((state) => state.folderSettings)
+  const setExpandOnSearch = useSampleStore((state) => state.setExpandOnSearch)
+  const setFolderClassificationEnabled = useSampleStore((state) => state.setFolderClassificationEnabled)
+  const setMemoryOptimizationMode = useSampleStore((state) => state.setMemoryOptimizationMode)
+  const setEnableChinesePinyinFuzzySearch = useSampleStore((state) => state.setEnableChinesePinyinFuzzySearch)
 
   useEffect(() => {
-    window.electronAPI.getAlwaysOnTop().then(setAlwaysOnTop)
-    window.electronAPI.getOpacity().then(setOpacity)
-    window.electronAPI.getAppVersion().then(setAppVersion).catch(() => setAppVersion(''))
+    desktop.window.getState().then((state) => {
+      setAlwaysOnTop(state.alwaysOnTop)
+      setOpacity(state.opacity)
+    })
+    desktop.window.getAppVersion().then(setAppVersion).catch(() => setAppVersion(''))
   }, [])
 
   useEffect(() => {
     const restoreCopySettings = async () => {
-      const storedCopySettings = await window.electronAPI.storeGet('copySettings') as {
-        enableAutoCopy?: boolean
-        keepCopies?: boolean
-      } | null
-      if (!storedCopySettings) return
-      setEnableAutoCopy(storedCopySettings.enableAutoCopy ?? true)
-      setKeepCopies(storedCopySettings.keepCopies ?? false)
+      const storedCopySettings = await desktop.copySettings.get()
+      setEnableAutoCopy(storedCopySettings.enableAutoCopy)
+      setKeepCopies(storedCopySettings.keepCopies)
     }
 
     restoreCopySettings()
@@ -77,12 +75,12 @@ export const TitleBar: React.FC<Props> = ({
   const toggleAlwaysOnTop = () => {
     const next = !alwaysOnTop
     setAlwaysOnTop(next)
-    window.electronAPI.setAlwaysOnTop(next)
+    desktop.window.setAlwaysOnTop(next)
   }
 
   const handleOpacityChange = (value: number) => {
     setOpacity(value)
-    window.electronAPI.setOpacity(value)
+    desktop.window.setOpacity(value)
   }
 
   const updateCopySettings = async (next: { enableAutoCopy?: boolean; keepCopies?: boolean }) => {
@@ -100,7 +98,7 @@ export const TitleBar: React.FC<Props> = ({
       if (next.enableAutoCopy !== undefined) setEnableAutoCopy(next.enableAutoCopy)
       if (next.keepCopies !== undefined) setKeepCopies(next.keepCopies)
 
-      await window.electronAPI.storeSet('copySettings', nextSettings)
+      await desktop.copySettings.set(nextSettings)
     } catch {
       setEnableAutoCopy(previousSettings.enableAutoCopy)
       setKeepCopies(previousSettings.keepCopies)
@@ -109,7 +107,7 @@ export const TitleBar: React.FC<Props> = ({
   }
 
   const handleOpenLink = (url: string) => {
-    window.electronAPI.openExternalLink(url)
+    desktop.shell.openExternal(url)
   }
 
   const isUpdating = updateState.phase === 'downloading' || updateState.phase === 'installing'
@@ -131,12 +129,13 @@ export const TitleBar: React.FC<Props> = ({
 
   return (
     <div
+      data-tauri-drag-region
       className="relative z-50 flex h-10 flex-shrink-0 items-center gap-1.5 overflow-visible border-b border-white/5 bg-zinc-950/90 px-2.5 backdrop-blur-xl"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
-      <div className="flex min-w-0 flex-1 items-center gap-2 text-text-secondary">
-        <img src={appIconUrl} alt="" className="h-6 w-6 flex-shrink-0 rounded-md object-contain" />
-        <span className="truncate text-xs font-medium">采样管理器</span>
+      <div data-tauri-drag-region className="flex min-w-0 flex-1 items-center gap-2 text-text-secondary">
+        <img data-tauri-drag-region src={appIconUrl} alt="" className="h-6 w-6 flex-shrink-0 rounded-md object-contain" />
+        <span data-tauri-drag-region className="truncate text-xs font-medium">采样管理器</span>
       </div>
 
       <div
@@ -240,7 +239,7 @@ export const TitleBar: React.FC<Props> = ({
                 <SettingCheckbox
                   checked={folderSettings.memoryOptimizationMode}
                   label="内存优化模式"
-                  note="降低已解码音频和波形缓存上限（64 MiB / 8 MiB）。"
+                  note="将已解码音频和波形缓存上限降至 16 MiB / 4 MiB。"
                   onChange={setMemoryOptimizationMode}
                 />
 
@@ -315,14 +314,14 @@ export const TitleBar: React.FC<Props> = ({
 
         <button
           className={iconButtonClassName}
-          onClick={() => window.electronAPI.minimizeWindow()}
+          onClick={() => desktop.window.minimize()}
           title="最小化"
         >
           <Minus size={15} />
         </button>
         <button
           className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-red-500/90 hover:text-white"
-          onClick={() => window.electronAPI.closeWindow()}
+          onClick={() => desktop.window.close()}
           title="关闭"
         >
           <X size={15} />

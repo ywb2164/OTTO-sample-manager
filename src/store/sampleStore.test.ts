@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { ImportCandidate, Sample, SampleGroup } from '@/types'
+import type { ImportCandidate, Sample, SampleGroup, SampleSummary } from '@/types'
 import { useSampleStore } from './sampleStore'
 import { audioRuntimeCache } from '@/services/audioRuntimeCache'
 
@@ -41,6 +41,8 @@ function createCandidate(id: string, filePath: string): ImportCandidate {
 function resetStore() {
   useSampleStore.setState({
     samples: new Map(),
+    sampleSummaries: new Map(),
+    pagedLibrary: false,
     groups: new Map(),
     groupOrder: [],
     activeGroupId: null,
@@ -52,6 +54,12 @@ function resetStore() {
     folderOrder: [],
     expandedFolderIds: new Set(),
     preSearchExpandedFolderIds: null,
+    folderSettings: {
+      expandOnSearch: true,
+      folderClassificationEnabled: true,
+      memoryOptimizationMode: false,
+      enableChinesePinyinFuzzySearch: false,
+    },
     hiddenSampleIds: new Set(),
     hiddenFolderIds: new Set(),
     contextMenuTarget: null,
@@ -108,6 +116,45 @@ describe('sample store group order', () => {
     useSampleStore.getState().restoreGroupOrder(null, groups)
 
     expect(useSampleStore.getState().groupOrder).toEqual(['a', 'b'])
+  })
+})
+
+describe('sample store paged library', () => {
+  beforeEach(() => {
+    resetStore()
+  })
+
+  it('keeps the compact catalog visible while replacing the bounded detail cache', () => {
+    const summaries: SampleSummary[] = Array.from({ length: 10 }, (_, index) => ({
+      kind: 'sample-summary',
+      id: `sample-${index}`,
+      fileName: `sample-${index}`,
+      fileExt: '.wav',
+      folderId: null,
+      groupIds: [],
+      importedAt: index,
+      pageIndex: Math.floor(index / 2),
+    }))
+    useSampleStore.setState((state) => ({
+      folderSettings: { ...state.folderSettings, folderClassificationEnabled: false },
+    }))
+    useSampleStore.getState().setPagedLibrary(summaries, [
+      createSample('sample-0', 'D:\\audio\\0.wav'),
+      createSample('sample-1', 'D:\\audio\\1.wav'),
+    ])
+
+    expect(useSampleStore.getState().getOrderedIds()).toHaveLength(10)
+    expect(useSampleStore.getState().samples.size).toBe(2)
+
+    useSampleStore.getState().replaceCachedSamples([
+      createSample('sample-8', 'D:\\audio\\8.wav'),
+      createSample('sample-9', 'D:\\audio\\9.wav'),
+    ])
+
+    const state = useSampleStore.getState()
+    expect(state.sampleSummaries.size).toBe(10)
+    expect([...state.samples.keys()]).toEqual(['sample-8', 'sample-9'])
+    expect(state.getOrderedIds()).toHaveLength(10)
   })
 })
 
@@ -216,8 +263,8 @@ describe('sample store import transaction', () => {
   it('applies memory optimization cache budgets through the persisted setting action', () => {
     useSampleStore.getState().setMemoryOptimizationMode(true)
     expect(audioRuntimeCache.getStats()).toMatchObject({
-      audioBuffer: { maxBytes: 64 * 1024 * 1024 },
-      waveform: { maxBytes: 8 * 1024 * 1024 },
+      audioBuffer: { maxBytes: 16 * 1024 * 1024 },
+      waveform: { maxBytes: 4 * 1024 * 1024 },
     })
 
     useSampleStore.getState().setMemoryOptimizationMode(false)

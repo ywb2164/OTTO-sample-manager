@@ -6,6 +6,8 @@ import type {
   Sample,
   SampleFolder,
   SampleGroup,
+  SampleListEntry,
+  SampleSummary,
   StoredImportUndoState,
   UndoImportSummary,
 } from '@/types'
@@ -16,11 +18,10 @@ import {
 } from '@/services/libraryImport'
 import { audioRuntimeCache } from '@/services/audioRuntimeCache'
 import {
-  compareSampleSearchMatches,
-  getSampleSearchIndexMap,
-  matchSampleSearch,
-  parseSearchQuery,
-} from '@/utils/sampleSearch'
+  persistPagedSample,
+  persistPagedSampleDeletes,
+  persistPagedSampleGroups,
+} from '@/services/pagedLibraryPersistence'
 
 function extractFolderInfo(filePath: string): {
   folderPath: string
@@ -83,18 +84,6 @@ function reconcileGroupOrder(groupOrder: string[] | null | undefined, groups: Ma
   return result
 }
 
-function getAncestorFolderIds(folderId: string, folders: Map<string, SampleFolder>): string[] {
-  const ancestors: string[] = []
-  let current = folders.get(folderId)
-
-  while (current?.parentId) {
-    ancestors.push(current.parentId)
-    current = folders.get(current.parentId)
-  }
-
-  return ancestors
-}
-
 function createFlatFolderForSample(sample: Sample): SampleFolder {
   const { folderPath } = extractFolderInfo(sample.filePath)
   const folderId = `folder_${folderPath}`
@@ -124,6 +113,7 @@ type FolderDerivedCache = {
 
 type FilteredSamplesCache = {
   samplesRef: Map<string, Sample> | null
+  sampleSummariesRef: Map<string, SampleSummary> | null
   foldersRef: Map<string, SampleFolder> | null
   groupsRef: Map<string, SampleGroup> | null
   hiddenSampleIdsRef: Set<string> | null
@@ -131,22 +121,23 @@ type FilteredSamplesCache = {
   searchQuery: string
   enableChinesePinyinFuzzySearch: boolean
   activeGroupId: string | null
+  searchResultIdsRef: string[] | null
   lastGroupChangeTimestamp: number
-  result: Sample[]
+  result: SampleListEntry[]
 }
 
 type FlattenedItemsCache = {
-  filteredSamplesRef: Sample[] | null
+  filteredSamplesRef: SampleListEntry[] | null
   foldersRef: Map<string, SampleFolder> | null
   folderOrderRef: string[] | null
   expandedFolderIdsRef: Set<string> | null
   hiddenFolderIdsRef: Set<string> | null
   folderClassificationEnabled: boolean | null
-  result: (Sample | SampleFolder)[]
+  result: (SampleListEntry | SampleFolder)[]
 }
 
 type OrderedIdsCache = {
-  filteredSamplesRef: Sample[] | null
+  filteredSamplesRef: SampleListEntry[] | null
   result: string[]
 }
 
@@ -164,6 +155,7 @@ const folderDerivedCache: FolderDerivedCache = {
 
 const filteredSamplesCache: FilteredSamplesCache = {
   samplesRef: null,
+  sampleSummariesRef: null,
   foldersRef: null,
   groupsRef: null,
   hiddenSampleIdsRef: null,
@@ -171,6 +163,7 @@ const filteredSamplesCache: FilteredSamplesCache = {
   searchQuery: '',
   enableChinesePinyinFuzzySearch: false,
   activeGroupId: null,
+  searchResultIdsRef: null,
   lastGroupChangeTimestamp: 0,
   result: [],
 }
@@ -251,10 +244,11 @@ function getFolderDerivedData(folders: Map<string, SampleFolder>) {
 }
 
 function getFilteredSamplesCached(state: Pick<SampleStore,
-  'samples' | 'folders' | 'groups' | 'searchQuery' | 'activeGroupId' | 'hiddenSampleIds' | 'hiddenFolderIds' | 'lastGroupChangeTimestamp' | 'folderSettings'
->): Sample[] {
+  'samples' | 'sampleSummaries' | 'pagedLibrary' | 'folders' | 'groups' | 'searchQuery' | 'searchResultIds' | 'activeGroupId' | 'hiddenSampleIds' | 'hiddenFolderIds' | 'lastGroupChangeTimestamp' | 'folderSettings'
+>): SampleListEntry[] {
   if (
     filteredSamplesCache.samplesRef === state.samples &&
+    filteredSamplesCache.sampleSummariesRef === state.sampleSummaries &&
     filteredSamplesCache.foldersRef === state.folders &&
     filteredSamplesCache.groupsRef === state.groups &&
     filteredSamplesCache.hiddenSampleIdsRef === state.hiddenSampleIds &&
@@ -262,6 +256,7 @@ function getFilteredSamplesCached(state: Pick<SampleStore,
     filteredSamplesCache.searchQuery === state.searchQuery &&
     filteredSamplesCache.enableChinesePinyinFuzzySearch === state.folderSettings.enableChinesePinyinFuzzySearch &&
     filteredSamplesCache.activeGroupId === state.activeGroupId &&
+    filteredSamplesCache.searchResultIdsRef === state.searchResultIds &&
     filteredSamplesCache.lastGroupChangeTimestamp === state.lastGroupChangeTimestamp
   ) {
     return filteredSamplesCache.result
@@ -275,7 +270,9 @@ function getFilteredSamplesCached(state: Pick<SampleStore,
     sampleIds.forEach((sampleId) => hiddenFolderSampleIds.add(sampleId))
   }
 
-  let list = [...state.samples.values()]
+  let list: SampleListEntry[] = state.pagedLibrary
+    ? [...state.sampleSummaries.values()].map((summary) => state.samples.get(summary.id) ?? summary)
+    : [...state.samples.values()]
   list = list.filter((sample) => !state.hiddenSampleIds.has(sample.id) && !hiddenFolderSampleIds.has(sample.id))
 
   if (state.activeGroupId) {
@@ -283,34 +280,16 @@ function getFilteredSamplesCached(state: Pick<SampleStore,
   }
 
   if (state.searchQuery.trim()) {
-    const keywords = parseSearchQuery(state.searchQuery)
-    const searchIndexMap = getSampleSearchIndexMap(state.samples)
-    const searchOptions = {
-      enableChinesePinyinFuzzySearch: state.folderSettings.enableChinesePinyinFuzzySearch,
-    }
-
-    const matchedEntries = list
-      .map((sample) => {
-        const searchIndex = searchIndexMap.get(sample.id)
-        if (!searchIndex) return null
-
-        const match = matchSampleSearch(searchIndex, keywords, searchOptions)
-        if (!match) return null
-
-        return { sample, match }
-      })
-      .filter((entry): entry is { sample: Sample; match: NonNullable<ReturnType<typeof matchSampleSearch>> } => entry !== null)
-
-    matchedEntries.sort((left, right) =>
-      compareSampleSearchMatches(left.sample, left.match, right.sample, right.match),
-    )
-
-    list = matchedEntries.map((entry) => entry.sample)
+    const visibleById = new Map(list.map((sample) => [sample.id, sample]))
+    list = (state.searchResultIds ?? [])
+      .map((sampleId) => visibleById.get(sampleId))
+      .filter((sample): sample is Sample => sample !== undefined)
   } else {
     list.sort((a, b) => a.importedAt - b.importedAt)
   }
 
   filteredSamplesCache.samplesRef = state.samples
+  filteredSamplesCache.sampleSummariesRef = state.sampleSummaries
   filteredSamplesCache.foldersRef = state.folders
   filteredSamplesCache.groupsRef = state.groups
   filteredSamplesCache.hiddenSampleIdsRef = state.hiddenSampleIds
@@ -318,13 +297,14 @@ function getFilteredSamplesCached(state: Pick<SampleStore,
   filteredSamplesCache.searchQuery = state.searchQuery
   filteredSamplesCache.enableChinesePinyinFuzzySearch = state.folderSettings.enableChinesePinyinFuzzySearch
   filteredSamplesCache.activeGroupId = state.activeGroupId
+  filteredSamplesCache.searchResultIdsRef = state.searchResultIds
   filteredSamplesCache.lastGroupChangeTimestamp = state.lastGroupChangeTimestamp
   filteredSamplesCache.result = list
 
   return list
 }
 
-function getOrderedIdsCached(filteredSamples: Sample[]): string[] {
+function getOrderedIdsCached(filteredSamples: SampleListEntry[]): string[] {
   if (orderedIdsCache.filteredSamplesRef === filteredSamples) {
     return orderedIdsCache.result
   }
@@ -367,7 +347,7 @@ function getFolderSelectedCountCached(
 
 function getFlattenedItemsCached(state: Pick<SampleStore,
   'folders' | 'folderOrder' | 'expandedFolderIds' | 'folderSettings' | 'hiddenFolderIds'
->, filteredSamples: Sample[]): (Sample | SampleFolder)[] {
+>, filteredSamples: SampleListEntry[]): (SampleListEntry | SampleFolder)[] {
   if (
     flattenedItemsCache.filteredSamplesRef === filteredSamples &&
     flattenedItemsCache.foldersRef === state.folders &&
@@ -394,7 +374,7 @@ function getFlattenedItemsCached(state: Pick<SampleStore,
   const { descendantSampleIdsByFolder } = getFolderDerivedData(state.folders)
   const filteredSampleIds = new Set(filteredSamples.map((sample) => sample.id))
   const filteredSampleMap = new Map(filteredSamples.map((sample) => [sample.id, sample]))
-  const items: (Sample | SampleFolder)[] = []
+  const items: (SampleListEntry | SampleFolder)[] = []
 
   const appendFolderTree = (folderId: string) => {
     if (state.hiddenFolderIds.has(folderId)) return
@@ -419,7 +399,7 @@ function getFlattenedItemsCached(state: Pick<SampleStore,
 
     const directSamples = folder.sampleIds
       .map((sampleId) => filteredSampleMap.get(sampleId))
-      .filter((sample): sample is Sample => sample !== undefined)
+      .filter((sample): sample is SampleListEntry => sample !== undefined)
       .sort((a, b) => a.importedAt - b.importedAt)
 
     items.push(...directSamples)
@@ -449,9 +429,12 @@ function getFlattenedItemsCached(state: Pick<SampleStore,
 
 interface SampleStore {
   samples: Map<string, Sample>
+  sampleSummaries: Map<string, SampleSummary>
+  pagedLibrary: boolean
   groups: Map<string, SampleGroup>
   groupOrder: string[]
   searchQuery: string
+  searchResultIds: string[] | null
   activeGroupId: string | null
   selectedIds: Set<string>
   anchorId: string | null
@@ -478,10 +461,13 @@ interface SampleStore {
   showSelectionBar: boolean
   lastGroupChangeTimestamp: number
   libraryRevision: number
+  persistenceVersion: number
   lastImportUndo: ImportUndoReceipt | null
   lastUndoSummary: UndoImportSummary | null
 
   addSamples: (samples: Sample[]) => void
+  setPagedLibrary: (summaries: SampleSummary[], samples: Sample[]) => void
+  replaceCachedSamples: (samples: Sample[]) => void
   commitImport: (payload: CommitImportPayload) => ImportSummary
   undoLastImport: () => UndoImportSummary | null
   invalidateLastImportUndo: () => void
@@ -501,6 +487,7 @@ interface SampleStore {
   removeFromGroup: (sampleIds: string[], groupId: string) => void
 
   setSearchQuery: (query: string) => void
+  setSearchResults: (ids: string[], ancestorFolderIds: string[]) => void
   setActiveGroupId: (id: string | null) => void
 
   setSelected: (ids: Set<string>) => void
@@ -532,10 +519,10 @@ interface SampleStore {
   closeContextMenu: () => void
   setShowSelectionBar: (show: boolean) => void
 
-  getFilteredSamples: () => Sample[]
+  getFilteredSamples: () => SampleListEntry[]
   getOrderedIds: () => string[]
   getFolderForSample: (sampleId: string) => SampleFolder | null
-  getFlattenedItems: () => (Sample | SampleFolder)[]
+  getFlattenedItems: () => (SampleListEntry | SampleFolder)[]
   getFolderSamples: (folderId: string) => Sample[]
   getFolderSampleIds: (folderId: string) => string[]
   getFolderSampleCount: (folderId: string) => number
@@ -544,9 +531,12 @@ interface SampleStore {
 
 export const useSampleStore = create<SampleStore>((set, get) => ({
   samples: new Map(),
+  sampleSummaries: new Map(),
+  pagedLibrary: false,
   groups: new Map(),
   groupOrder: [],
   searchQuery: '',
+  searchResultIds: null,
   activeGroupId: null,
   selectedIds: new Set(),
   anchorId: null,
@@ -568,8 +558,28 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
   showSelectionBar: false,
   lastGroupChangeTimestamp: Date.now(),
   libraryRevision: 0,
+  persistenceVersion: 0,
   lastImportUndo: null,
   lastUndoSummary: null,
+
+  setPagedLibrary: (summaries, cachedSamples) => set(() => ({
+    pagedLibrary: true,
+    sampleSummaries: new Map(summaries.map((summary) => [summary.id, summary])),
+    samples: new Map(cachedSamples.map((sample) => [sample.id, sample])),
+  })),
+
+  replaceCachedSamples: (cachedSamples) => set((state) => {
+    const samples = new Map<string, Sample>()
+    for (const sample of cachedSamples) {
+      const current = state.samples.get(sample.id)
+      samples.set(sample.id, current ? {
+        ...sample,
+        waveformData: current.waveformData,
+        isDecoded: current.isDecoded,
+      } : sample)
+    }
+    return { samples }
+  }),
 
   addSamples: (newSamples) => set((state) => {
     const samples = new Map(state.samples)
@@ -715,6 +725,8 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     audioRuntimeCache.clearAll()
     return {
     samples: new Map(),
+    sampleSummaries: new Map(),
+    pagedLibrary: false,
     groups: new Map(),
     groupOrder: [],
     selectedIds: new Set(),
@@ -738,17 +750,22 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     }
   }),
 
-  removeSamples: (ids) => set((state) => {
+  removeSamples: (ids) => {
+    const before = get()
+    const persistedIds = ids.filter((id) => before.samples.has(id) || before.sampleSummaries.has(id))
+    set((state) => {
     const samples = new Map(state.samples)
+    const sampleSummaries = new Map(state.sampleSummaries)
     const groups = new Map(state.groups)
     const folders = new Map(state.folders)
     const selectedIds = new Set(state.selectedIds)
 
-    const existingIds = ids.filter((id) => state.samples.has(id))
+    const existingIds = ids.filter((id) => state.samples.has(id) || state.sampleSummaries.has(id))
     if (existingIds.length === 0) return {}
 
     for (const id of existingIds) {
       samples.delete(id)
+      sampleSummaries.delete(id)
       selectedIds.delete(id)
       audioRuntimeCache.removeSample(id)
     }
@@ -769,6 +786,7 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
 
     return {
       samples,
+      sampleSummaries,
       groups,
       folders,
       selectedIds,
@@ -776,16 +794,40 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
       lastImportUndo: null,
       lastGroupChangeTimestamp: Date.now(),
     }
-  }),
+    })
+    if (before.pagedLibrary) persistPagedSampleDeletes(persistedIds)
+  },
 
-  updateSample: (id, patch) => set((state) => {
+  updateSample: (id, patch) => {
+    const persistedKeys = Object.keys(patch).filter((key) => key !== 'waveformData' && key !== 'isDecoded')
+    set((state) => {
     const samples = new Map(state.samples)
+    const sampleSummaries = new Map(state.sampleSummaries)
     const existing = samples.get(id)
     if (existing) {
       samples.set(id, { ...existing, ...patch })
     }
-    return { samples }
-  }),
+    const summary = sampleSummaries.get(id)
+    if (summary) {
+      sampleSummaries.set(id, {
+        ...summary,
+        fileName: patch.fileName ?? summary.fileName,
+        fileExt: patch.fileExt ?? summary.fileExt,
+        folderId: patch.folderId === undefined ? summary.folderId : patch.folderId ?? null,
+        groupIds: patch.groupIds ?? summary.groupIds,
+        importedAt: patch.importedAt ?? summary.importedAt,
+      })
+    }
+    return {
+      samples,
+      sampleSummaries,
+      persistenceVersion: state.persistenceVersion + (persistedKeys.length > 0 ? 1 : 0),
+    }
+    })
+    const state = get()
+    const updated = state.samples.get(id)
+    if (state.pagedLibrary && persistedKeys.length > 0 && updated) persistPagedSample(updated)
+  },
 
   addGroup: (group) => set((state) => {
     const groups = new Map(state.groups)
@@ -803,6 +845,7 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
   removeGroup: (id) => set((state) => {
     const groups = new Map(state.groups)
     const samples = new Map(state.samples)
+    const sampleSummaries = new Map(state.sampleSummaries)
     groups.delete(id)
 
     for (const [sid, sample] of samples) {
@@ -813,12 +856,21 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
         })
       }
     }
+    for (const [sid, summary] of sampleSummaries) {
+      if (summary.groupIds.includes(id)) {
+        sampleSummaries.set(sid, {
+          ...summary,
+          groupIds: summary.groupIds.filter((groupId) => groupId !== id),
+        })
+      }
+    }
 
     const groupOrder = reconcileGroupOrder(state.groupOrder.filter((groupId) => groupId !== id), groups)
     return {
       groups,
       groupOrder,
       samples,
+      sampleSummaries,
       libraryRevision: state.libraryRevision + 1,
       lastImportUndo: null,
       lastGroupChangeTimestamp: Date.now(),
@@ -860,14 +912,20 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     groupOrder: reconcileGroupOrder(groupOrder, providedGroups ?? state.groups),
   })),
 
-  addToGroup: (sampleIds, groupId) => set((state) => {
+  addToGroup: (sampleIds, groupId) => {
+    set((state) => {
     const samples = new Map(state.samples)
+    const sampleSummaries = new Map(state.sampleSummaries)
     const groups = new Map(state.groups)
 
     for (const sid of sampleIds) {
       const sample = samples.get(sid)
       if (sample && !sample.groupIds.includes(groupId)) {
         samples.set(sid, { ...sample, groupIds: [...sample.groupIds, groupId] })
+      }
+      const summary = sampleSummaries.get(sid)
+      if (summary && !summary.groupIds.includes(groupId)) {
+        sampleSummaries.set(sid, { ...summary, groupIds: [...summary.groupIds, groupId] })
       }
     }
 
@@ -881,15 +939,26 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
 
     return {
       samples,
+      sampleSummaries,
       groups,
       libraryRevision: state.libraryRevision + 1,
       lastImportUndo: null,
       lastGroupChangeTimestamp: Date.now(),
     }
-  }),
+    })
+    const state = get()
+    if (state.pagedLibrary) {
+      persistPagedSampleGroups(sampleIds.flatMap((sampleId) => {
+        const summary = state.sampleSummaries.get(sampleId)
+        return summary ? [{ sampleId, groupIds: summary.groupIds }] : []
+      }))
+    }
+  },
 
-  removeFromGroup: (sampleIds, groupId) => set((state) => {
+  removeFromGroup: (sampleIds, groupId) => {
+    set((state) => {
     const samples = new Map(state.samples)
+    const sampleSummaries = new Map(state.sampleSummaries)
     const groups = new Map(state.groups)
 
     for (const sid of sampleIds) {
@@ -898,6 +967,13 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
         samples.set(sid, {
           ...sample,
           groupIds: sample.groupIds.filter((group) => group !== groupId),
+        })
+      }
+      const summary = sampleSummaries.get(sid)
+      if (summary) {
+        sampleSummaries.set(sid, {
+          ...summary,
+          groupIds: summary.groupIds.filter((group) => group !== groupId),
         })
       }
     }
@@ -912,12 +988,21 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
 
     return {
       samples,
+      sampleSummaries,
       groups,
       libraryRevision: state.libraryRevision + 1,
       lastImportUndo: null,
       lastGroupChangeTimestamp: Date.now(),
     }
-  }),
+    })
+    const state = get()
+    if (state.pagedLibrary) {
+      persistPagedSampleGroups(sampleIds.flatMap((sampleId) => {
+        const summary = state.sampleSummaries.get(sampleId)
+        return summary ? [{ sampleId, groupIds: summary.groupIds }] : []
+      }))
+    }
+  },
 
   setSearchQuery: (searchQuery) => set((state) => {
     const wasEmpty = !state.searchQuery.trim()
@@ -931,38 +1016,7 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
         preSearchExpandedFolderIds = new Set(state.expandedFolderIds)
       }
 
-      if (state.folderSettings.expandOnSearch) {
-        expandedFolderIds = new Set(preSearchExpandedFolderIds ?? state.expandedFolderIds)
-        const keywords = parseSearchQuery(searchQuery)
-        const searchIndexMap = getSampleSearchIndexMap(state.samples)
-        const matchingFolderIds = new Set<string>()
-
-        for (const sample of state.samples.values()) {
-          if (state.activeGroupId && !sample.groupIds.includes(state.activeGroupId)) {
-            continue
-          }
-
-          const searchIndex = searchIndexMap.get(sample.id)
-          if (!searchIndex || !sample.folderId) {
-            continue
-          }
-
-          const matches = matchSampleSearch(searchIndex, keywords, {
-            enableChinesePinyinFuzzySearch: state.folderSettings.enableChinesePinyinFuzzySearch,
-          })
-
-          if (!matches) {
-            continue
-          }
-
-          matchingFolderIds.add(sample.folderId)
-          for (const ancestorId of getAncestorFolderIds(sample.folderId, state.folders)) {
-            matchingFolderIds.add(ancestorId)
-          }
-        }
-
-        matchingFolderIds.forEach((folderId) => expandedFolderIds.add(folderId))
-      }
+      expandedFolderIds = new Set(preSearchExpandedFolderIds ?? state.expandedFolderIds)
     } else if (!wasEmpty && isEmpty && state.preSearchExpandedFolderIds) {
       expandedFolderIds = new Set(state.preSearchExpandedFolderIds)
       preSearchExpandedFolderIds = null
@@ -970,9 +1024,21 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
 
     return {
       searchQuery,
+      searchResultIds: isEmpty ? null : [],
       expandedFolderIds,
       preSearchExpandedFolderIds,
     }
+  }),
+
+  setSearchResults: (ids, ancestorFolderIds) => set((state) => {
+    if (!state.searchQuery.trim()) return { searchResultIds: null }
+    const expandedFolderIds = state.folderSettings.expandOnSearch
+      ? new Set([
+          ...(state.preSearchExpandedFolderIds ?? state.expandedFolderIds),
+          ...ancestorFolderIds,
+        ])
+      : state.expandedFolderIds
+    return { searchResultIds: ids, expandedFolderIds }
   }),
 
   setActiveGroupId: (activeGroupId) => set({ activeGroupId }),
@@ -1019,6 +1085,7 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
 
   removeFolder: (id) => set((state) => {
     const samples = new Map(state.samples)
+    const sampleSummaries = new Map(state.sampleSummaries)
     const groups = new Map(state.groups)
     const folders = new Map(state.folders)
     const selectedIds = new Set(state.selectedIds)
@@ -1054,6 +1121,7 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
 
     for (const sampleId of sampleIdsToRemove) {
       samples.delete(sampleId)
+      sampleSummaries.delete(sampleId)
       selectedIds.delete(sampleId)
       hiddenSampleIds.delete(sampleId)
       audioRuntimeCache.removeSample(sampleId)
@@ -1069,6 +1137,7 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     folderOrder = [...folderOrder]
     return {
       samples,
+      sampleSummaries,
       groups,
       folders,
       folderOrder,
@@ -1101,14 +1170,20 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
     } else {
       expandedFolderIds.add(id)
     }
-    return { expandedFolderIds }
+    return {
+      expandedFolderIds,
+      persistenceVersion: state.persistenceVersion + 1,
+    }
   }),
 
   setFolderExpanded: (id, expanded) => set((state) => {
     const expandedFolderIds = new Set(state.expandedFolderIds)
     if (expanded) expandedFolderIds.add(id)
     else expandedFolderIds.delete(id)
-    return { expandedFolderIds }
+    return {
+      expandedFolderIds,
+      persistenceVersion: state.persistenceVersion + 1,
+    }
   }),
 
   moveFolder: (fromIndex, toIndex) => set((state) => {
@@ -1127,21 +1202,25 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
 
   setExpandOnSearch: (value) => set((state) => ({
     folderSettings: { ...state.folderSettings, expandOnSearch: value },
+    persistenceVersion: state.persistenceVersion + 1,
   })),
 
   setFolderClassificationEnabled: (value) => set((state) => ({
     folderSettings: { ...state.folderSettings, folderClassificationEnabled: value },
+    persistenceVersion: state.persistenceVersion + 1,
   })),
 
   setMemoryOptimizationMode: (value) => {
     audioRuntimeCache.setMemoryOptimizationMode(value)
     set((state) => ({
       folderSettings: { ...state.folderSettings, memoryOptimizationMode: value },
+      persistenceVersion: state.persistenceVersion + 1,
     }))
   },
 
   setEnableChinesePinyinFuzzySearch: (value) => set((state) => ({
     folderSettings: { ...state.folderSettings, enableChinesePinyinFuzzySearch: value },
+    persistenceVersion: state.persistenceVersion + 1,
   })),
 
   toggleSampleHidden: (sampleId) => set((state) => {
@@ -1178,10 +1257,11 @@ export const useSampleStore = create<SampleStore>((set, get) => ({
   getOrderedIds: () => getOrderedIdsCached(get().getFilteredSamples()),
 
   getFolderForSample: (sampleId) => {
-    const { samples, folders } = get()
+    const { samples, sampleSummaries, folders } = get()
     const sample = samples.get(sampleId)
-    if (!sample?.folderId) return null
-    return folders.get(sample.folderId) ?? null
+    const folderId = sample?.folderId ?? sampleSummaries.get(sampleId)?.folderId
+    if (!folderId) return null
+    return folders.get(folderId) ?? null
   },
 
   getFolderSamples: (folderId) => {

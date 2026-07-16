@@ -1,0 +1,45 @@
+[package]
+name = "otto-sample-manager"
+version = "2.5.0"
+description = "OTTO Sample Manager"
+authors = ["ywb2164", "Candace"]
+edition = "2024"
+rust-version = "1.85"
+
+[lib]
+name = "otto_sample_manager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10.9"
+symphonia = { version = "0.6.0", default-features = false, features = ["aac", "aiff", "alac", "flac", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav"] }
+tauri = { version = "2.11.5", features = [] }
+tauri-plugin-dialog = "2.7.1"
+tauri-plugin-opener = "2.5.4"
+tauri-plugin-single-instance = "2.4.3"
+tauri-plugin-updater = "2.10.1"
+thiserror = "2.0.18"
+uuid = { version = "1.23.5", features = ["v4", "serde"] }
+walkdir = "2.5.0"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61.3", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_System_Ole",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Shell",
+  "Win32_UI_Shell_Common",
+] }

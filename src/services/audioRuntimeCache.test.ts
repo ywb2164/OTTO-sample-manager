@@ -14,16 +14,16 @@ describe('audioRuntimeCache', () => {
     audioRuntimeCache.setMemoryOptimizationMode(false)
   })
 
-  it('uses the existing default budgets and lower budgets in memory optimization mode', () => {
+  it('uses the Tauri-era 64 MiB default and 16 MiB low-memory PCM budgets', () => {
     expect(audioRuntimeCache.getStats()).toMatchObject({
-      audioBuffer: { maxBytes: 200 * 1024 * 1024 },
-      waveform: { maxBytes: 50 * 1024 * 1024 },
+      audioBuffer: { maxBytes: 64 * 1024 * 1024 },
+      waveform: { maxBytes: 8 * 1024 * 1024 },
     })
 
     audioRuntimeCache.setMemoryOptimizationMode(true)
     expect(audioRuntimeCache.getStats()).toMatchObject({
-      audioBuffer: { maxBytes: 64 * 1024 * 1024 },
-      waveform: { maxBytes: 8 * 1024 * 1024 },
+      audioBuffer: { maxBytes: 16 * 1024 * 1024 },
+      waveform: { maxBytes: 4 * 1024 * 1024 },
     })
   })
 
@@ -34,10 +34,10 @@ describe('audioRuntimeCache', () => {
 
     audioRuntimeCache.setMemoryOptimizationMode(true)
     expect(audioRuntimeCache.hasAudioBuffer('playing')).toBe(true)
-    expect(audioRuntimeCache.getStats().audioBuffer.estimatedBytes).toBeGreaterThan(64 * 1024 * 1024)
+    expect(audioRuntimeCache.getStats().audioBuffer.estimatedBytes).toBeGreaterThan(16 * 1024 * 1024)
 
     audioRuntimeCache.unpinSample('playing')
-    expect(audioRuntimeCache.getStats().audioBuffer.estimatedBytes).toBeLessThanOrEqual(64 * 1024 * 1024)
+    expect(audioRuntimeCache.getStats().audioBuffer.estimatedBytes).toBeLessThanOrEqual(16 * 1024 * 1024)
   })
 
   it('removes decoded, waveform, pending, and pin state for deleted samples', () => {
@@ -53,5 +53,18 @@ describe('audioRuntimeCache', () => {
     expect(audioRuntimeCache.hasWaveform('deleted')).toBe(false)
     expect(audioRuntimeCache.getPendingDecode('deleted')).toBeUndefined()
     expect(audioRuntimeCache.getPendingWaveform('deleted')).toBeUndefined()
+  })
+
+  it('does not let an older promise clear a newer pending decode for the same sample', () => {
+    const older = Promise.resolve(null)
+    const newer = Promise.resolve(null)
+    audioRuntimeCache.setPendingDecode('rapid', older)
+    audioRuntimeCache.setPendingDecode('rapid', newer)
+
+    audioRuntimeCache.clearPendingDecode('rapid', older)
+    expect(audioRuntimeCache.getPendingDecode('rapid')).toBe(newer)
+
+    audioRuntimeCache.clearPendingDecode('rapid', newer)
+    expect(audioRuntimeCache.getPendingDecode('rapid')).toBeUndefined()
   })
 })

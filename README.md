@@ -151,13 +151,16 @@ OTTO Sample Manager：
 
 ## 技术栈
 
-- Electron
+- Tauri 2 + Rust（Windows 10/11 x64 迁移版）
 - React
 - TypeScript
 - Zustand
-- Web Audio API
-- electron-store
+- SQLite（WAL、增量写入、后台导入）
+- Web Audio API + `HTMLMediaElement` Range 流式播放
 - pinyin-pro（用于歌词转拼音）
+
+迁移期间 Electron 版仍保留为稳定兼容入口。React 界面通过统一的
+`DesktopBridge` 同时适配 Electron 与 Tauri；Tauri 版不向前端暴露原始文件系统或 SQL。
 
 ---
 
@@ -167,6 +170,10 @@ OTTO Sample Manager：
 
 - Node.js 18+
 - npm
+- Rust 1.85+
+- Windows 10/11 x64
+- Visual Studio 2022/2026 C++ Desktop Build Tools 与 Windows SDK
+- Microsoft Edge WebView2 Runtime（Windows 10/11 通常已安装）
 
 ---
 
@@ -182,6 +189,14 @@ npm install
 
 ### 开发模式
 
+Tauri 迁移版：
+
+```bash
+npm run tauri:dev
+```
+
+Electron 稳定版：
+
 ```bash
 npm run dev
 ```
@@ -189,6 +204,33 @@ npm run dev
 ---
 
 ### 构建
+
+类型、前端测试与 Rust 测试：
+
+```bash
+npm run check:types
+npm test
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+Tauri NSIS 检查包（不生成更新签名）：
+
+```bash
+npm run tauri:build
+```
+
+若要把未安装的 Tauri exe 作为便携版运行，可在 exe 同目录创建
+`otto-portable.flag`。该模式会把 SQLite、缓存与 `Copy` 放在同目录的 `data` 下；没有标记的
+NSIS 安装版继续使用 `%APPDATA%\sample-manager`，以便无缝读取 Electron 旧数据。
+
+签名发布包使用 `src-tauri/tauri.release.conf.json`，并且必须通过环境变量提供
+`TAURI_SIGNING_PRIVATE_KEY` 与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：
+
+```bash
+npm run tauri:build:release
+```
+
+Electron 版构建：
 
 ```bash
 npm run build
@@ -201,6 +243,10 @@ npm run build
 ```bash
 npm run pack
 ```
+
+Tauri 发布前还必须完成 Melodyne / FL Studio 原生拖出、迁移、更新、内存与性能矩阵；详见
+[`docs/tauri-migration-acceptance.md`](docs/tauri-migration-acceptance.md)。未完成这些硬门槛前，
+Electron 稳定版不会下线。
 
 ---
 

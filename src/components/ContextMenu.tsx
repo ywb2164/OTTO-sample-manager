@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { EyeOff, Layers3, RotateCcw, Trash2, Check, ChevronRight } from 'lucide-react'
 import { useSampleStore } from '@/store/sampleStore'
+import { getDesktopBridgeIfAvailable } from '@/services/desktopBridge'
 
 export const ContextMenu: React.FC = () => {
+  const desktop = getDesktopBridgeIfAvailable()
+  const isTauri = desktop?.runtime === 'tauri'
   const contextMenuTarget = useSampleStore(s => s.contextMenuTarget)
   const closeContextMenu = useSampleStore(s => s.closeContextMenu)
   const toggleSampleHidden = useSampleStore(s => s.toggleSampleHidden)
@@ -13,6 +16,7 @@ export const ContextMenu: React.FC = () => {
   const addToGroup = useSampleStore(s => s.addToGroup)
   const removeFromGroup = useSampleStore(s => s.removeFromGroup)
   const samples = useSampleStore(s => s.samples)
+  const sampleSummaries = useSampleStore(s => s.sampleSummaries)
   const getFolderSampleIds = useSampleStore(s => s.getFolderSampleIds)
   const lastImportUndo = useSampleStore(s => s.lastImportUndo)
   const undoLastImport = useSampleStore(s => s.undoLastImport)
@@ -78,20 +82,36 @@ export const ContextMenu: React.FC = () => {
     closeContextMenu()
   }, [closeContextMenu])
 
-  const handleUndoImport = useCallback(() => {
-    if (!lastImportUndo) return
+  const handleUndoImport = useCallback(async () => {
+    if (!isTauri && !lastImportUndo) return
     const confirmed = window.confirm(
       '确定撤回上次导入吗？\n这只会移除管理器中的新增记录和归组关系，不会删除磁盘文件。',
     )
-    if (confirmed) undoLastImport()
+    if (confirmed) {
+      if (isTauri && desktop) {
+        const summary = await desktop.library.undoLastImport()
+        if (summary) {
+          useSampleStore.setState({
+            lastUndoSummary: {
+              removedSamples: summary.removedSamples,
+              removedGroupLinks: summary.removedGroupLinks,
+              restoredFolders: summary.removedFolders,
+            },
+          })
+          window.dispatchEvent(new CustomEvent('otto:library-changed'))
+        }
+      } else {
+        undoLastImport()
+      }
+    }
     closeContextMenu()
-  }, [lastImportUndo, undoLastImport, closeContextMenu])
+  }, [desktop, isTauri, lastImportUndo, undoLastImport, closeContextMenu])
 
   const handleGroupAction = useCallback((groupId: string) => {
     if (!contextMenuTarget) return
 
     const targetSampleIds = contextMenuTarget.type === 'sample'
-      ? samples.has(contextMenuTarget.id) ? [contextMenuTarget.id] : []
+      ? (samples.has(contextMenuTarget.id) || sampleSummaries.has(contextMenuTarget.id)) ? [contextMenuTarget.id] : []
       : getFolderSampleIds(contextMenuTarget.id)
 
     if (targetSampleIds.length === 0) {
@@ -101,7 +121,7 @@ export const ContextMenu: React.FC = () => {
     }
 
     const allInGroup = targetSampleIds.every((sampleId) =>
-      samples.get(sampleId)?.groupIds.includes(groupId),
+      (samples.get(sampleId)?.groupIds ?? sampleSummaries.get(sampleId)?.groupIds ?? []).includes(groupId),
     )
 
     if (allInGroup) {
@@ -112,7 +132,7 @@ export const ContextMenu: React.FC = () => {
 
     setShowGroupSubmenu(false)
     closeContextMenu()
-  }, [contextMenuTarget, samples, getFolderSampleIds, addToGroup, removeFromGroup, closeContextMenu])
+  }, [contextMenuTarget, samples, sampleSummaries, getFolderSampleIds, addToGroup, removeFromGroup, closeContextMenu])
 
   const handleGroupSubmenuToggle = useCallback(() => {
     setShowGroupSubmenu(prev => !prev)
@@ -120,8 +140,8 @@ export const ContextMenu: React.FC = () => {
 
   // 计算当前样本的分组信息（仅样本类型）
   const targetSampleIds = contextMenuTarget
-    ? contextMenuTarget.type === 'sample'
-      ? samples.has(contextMenuTarget.id) ? [contextMenuTarget.id] : []
+      ? contextMenuTarget.type === 'sample'
+      ? (samples.has(contextMenuTarget.id) || sampleSummaries.has(contextMenuTarget.id)) ? [contextMenuTarget.id] : []
       : contextMenuTarget.type === 'folder'
         ? getFolderSampleIds(contextMenuTarget.id)
         : []
@@ -135,7 +155,7 @@ export const ContextMenu: React.FC = () => {
   if (contextMenuTarget.type === 'background') {
     const label = lastImportUndo
       ? `撤回上次导入（新增 ${lastImportUndo.summary.added} / 归组 ${lastImportUndo.summary.linkedToGroup}）`
-      : '暂无可撤回导入'
+      : isTauri ? '撤回上次导入' : '暂无可撤回导入'
 
     return (
       <div
@@ -145,8 +165,8 @@ export const ContextMenu: React.FC = () => {
       >
         <button
           className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-text-primary transition-colors enabled:hover:bg-bg-hover disabled:cursor-not-allowed disabled:text-text-dim"
-          disabled={!lastImportUndo}
-          onClick={handleUndoImport}
+          disabled={!isTauri && !lastImportUndo}
+          onClick={() => { void handleUndoImport() }}
         >
           <RotateCcw size={14} />
           <span>{label}</span>
@@ -197,7 +217,7 @@ export const ContextMenu: React.FC = () => {
               ) : (
                 groupList.map(group => {
                   const isInGroup = targetSampleIds.length > 0 && targetSampleIds.every((sampleId) =>
-                    samples.get(sampleId)?.groupIds.includes(group.id),
+                    (samples.get(sampleId)?.groupIds ?? sampleSummaries.get(sampleId)?.groupIds ?? []).includes(group.id),
                   )
                   return (
                     <button

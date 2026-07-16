@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react'
 import { AlertTriangle, Play } from 'lucide-react'
 import { Sample } from '@/types'
 import { useSampleStore } from '@/store/sampleStore'
+import { getDesktopBridge } from '@/services/desktopBridge'
 
 interface Props {
   sample: Sample
@@ -11,7 +12,7 @@ interface Props {
   onSelect: (id: string, e: React.MouseEvent) => void
 }
 
-export const SampleItem: React.FC<Props> = ({
+const SampleItemComponent: React.FC<Props> = ({
   sample,
   isSelected,
   isPlaying,
@@ -57,17 +58,24 @@ export const SampleItem: React.FC<Props> = ({
     
     // 如果拖的是选中集合里的一个，则拖出所有选中的
     // 如果拖的不在选中集合里，则只拖这一个
+    let dragIds: string[]
     let dragPaths: string[]
     if (selectedIds.has(sample.id) && selectedIds.size > 1) {
       const { samples } = useSampleStore.getState()
-      dragPaths = [...selectedIds]
+      const desktop = getDesktopBridge()
+      dragIds = desktop.runtime === 'tauri'
+        ? [...selectedIds]
+        : [...selectedIds].filter((id) => samples.has(id))
+      dragPaths = dragIds
         .map(id => samples.get(id)?.filePath)
         .filter(Boolean) as string[]
     } else {
+      dragIds = [sample.id]
       dragPaths = [sample.filePath]
     }
     
-    window.electronAPI.dragOutFiles(dragPaths)
+    void getDesktopBridge().drag.start({ sampleIds: dragIds, filePaths: dragPaths })
+      .catch((error) => console.error('原生拖出失败', error))
   }, [sample])
 
   // 右键菜单
@@ -160,3 +168,5 @@ export const SampleItem: React.FC<Props> = ({
     </div>
   )
 }
+
+export const SampleItem = React.memo(SampleItemComponent)

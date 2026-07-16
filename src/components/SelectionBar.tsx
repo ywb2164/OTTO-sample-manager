@@ -3,7 +3,9 @@ import { Trash2, X } from 'lucide-react'
 import { useSampleStore } from '@/store/sampleStore'
 
 export const SelectionBar: React.FC = () => {
-  const { selectedIds, clearSelection, removeSamples } = useSampleStore()
+  const selectedIds = useSampleStore((state) => state.selectedIds)
+  const clearSelection = useSampleStore((state) => state.clearSelection)
+  const removeSamples = useSampleStore((state) => state.removeSamples)
 
   const handleClear = () => {
     clearSelection()
