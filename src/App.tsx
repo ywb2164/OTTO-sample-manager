@@ -259,6 +259,7 @@ export default function App() {
   const importTargetGroupIdRef = React.useRef<string | null>(null)
   
   const samples = useSampleStore((state) => state.samples)
+  const sampleSummaries = useSampleStore((state) => state.sampleSummaries)
   const sampleCount = useSampleStore((state) => state.pagedLibrary ? state.sampleSummaries.size : state.samples.size)
   const selectedIds = useSampleStore((state) => state.selectedIds)
   const addSamples = useSampleStore((state) => state.addSamples)
@@ -392,7 +393,8 @@ export default function App() {
   const visiblePageKey = virtualItems
     .map((row) => {
       const item = flattenedItems[row.index]
-      return item && 'kind' in item && item.kind === 'sample-summary' ? item.pageIndex : -1
+      if (!item || 'path' in item) return -1
+      return sampleSummaries.get(item.id)?.pageIndex ?? -1
     })
     .filter((pageIndex) => pageIndex >= 0)
     .join(',')
@@ -410,15 +412,18 @@ export default function App() {
       .split(',')
       .map(Number)
       .filter((pageIndex) => Number.isInteger(pageIndex) && pageIndex >= 0)
+    tauriLibraryPageCache.setRequiredPageIndexes(new Set(visiblePages))
     const pagesToLoad = new Set<number>()
     for (const pageIndex of visiblePages) {
       pagesToLoad.add(pageIndex)
-      if (pageIndex > 0) pagesToLoad.add(pageIndex - 1)
-      pagesToLoad.add(pageIndex + 1)
+      if (!searchQuery.trim()) {
+        if (pageIndex > 0) pagesToLoad.add(pageIndex - 1)
+        pagesToLoad.add(pageIndex + 1)
+      }
     }
     void Promise.all([...pagesToLoad].map((pageIndex) => ensureTauriLibraryPage(desktop, pageIndex)))
     syncTauriPageCacheToStore()
-  }, [anchorId, currentSampleId, desktop, memoryOptimizationMode, selectedIds, visiblePageKey])
+  }, [anchorId, currentSampleId, desktop, memoryOptimizationMode, searchQuery, selectedIds, visiblePageKey])
 
   useEffect(() => {
     const previousGroupKey = previousGroupScrollKeyRef.current

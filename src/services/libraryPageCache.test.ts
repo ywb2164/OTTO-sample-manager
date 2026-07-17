@@ -53,6 +53,27 @@ describe('LibraryPageCache', () => {
     expect(cache.loadedItemCount).toBe(1)
   })
 
+  it('keeps every required viewport page resident beyond the background page budget', () => {
+    const cache = new LibraryPageCache<Row>({ pageSize: 2, maxPages: 2 })
+    const generation = cache.reset()
+    cache.setRequiredPageIndexes(new Set([1, 3, 5]))
+
+    for (const pageIndex of [0, 1, 2, 3, 5]) {
+      cache.storePage(pageIndex, page(pageIndex), generation)
+    }
+
+    expect([1, 3, 5].map((pageIndex) => cache.hasPage(pageIndex))).toEqual([true, true, true])
+    expect(cache.loadedPageCount).toBe(3)
+    expect(cache.hasPage(0)).toBe(false)
+    expect(cache.hasPage(2)).toBe(false)
+
+    cache.storePage(4, page(4), generation)
+
+    expect([1, 3, 5].map((pageIndex) => cache.hasPage(pageIndex))).toEqual([true, true, true])
+    expect(cache.loadedPageCount).toBe(3)
+    expect(cache.hasPage(4)).toBe(false)
+  })
+
   it('rejects stale page responses after a query generation reset', () => {
     const cache = new LibraryPageCache<Row>({ pageSize: 2, maxPages: 2 })
     const staleGeneration = cache.reset()

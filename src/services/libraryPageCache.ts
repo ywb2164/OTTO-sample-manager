@@ -16,6 +16,7 @@ export class LibraryPageCache<T extends { id: string }> {
   private readonly pages = new Map<number, CachedPage<T>>()
   private readonly itemPages = new Map<string, number>()
   private pinnedIds = new Set<string>()
+  private requiredPageIndexes = new Set<number>()
 
   constructor({ pageSize, maxPages }: LibraryPageCacheOptions) {
     if (!Number.isInteger(pageSize) || pageSize <= 0) {
@@ -97,6 +98,17 @@ export class LibraryPageCache<T extends { id: string }> {
     this.evictToBudget()
   }
 
+  setRequiredPageIndexes(pageIndexes: ReadonlySet<number>): void {
+    for (const pageIndex of pageIndexes) {
+      if (!Number.isInteger(pageIndex) || pageIndex < 0) {
+        throw new Error('required page indexes must be non-negative integers')
+      }
+    }
+
+    this.requiredPageIndexes = new Set(pageIndexes)
+    this.evictToBudget()
+  }
+
   setMaxPages(maxPages: number): void {
     if (!Number.isInteger(maxPages) || maxPages <= 0) {
       throw new Error('maxPages must be a positive integer')
@@ -107,11 +119,13 @@ export class LibraryPageCache<T extends { id: string }> {
   }
 
   private evictToBudget(): void {
-    while (this.pages.size > this.maxPages) {
+    const pageLimit = Math.max(this.maxPages, this.requiredPageIndexes.size)
+    while (this.pages.size > pageLimit) {
       let candidateIndex: number | undefined
       let oldestAccess = Number.POSITIVE_INFINITY
 
       for (const [pageIndex, page] of this.pages) {
+        if (this.requiredPageIndexes.has(pageIndex)) continue
         const isPinned = page.items.some((item) => this.pinnedIds.has(item.id))
         if (!isPinned && page.lastUsed < oldestAccess) {
           candidateIndex = pageIndex
@@ -121,6 +135,7 @@ export class LibraryPageCache<T extends { id: string }> {
 
       if (candidateIndex === undefined) {
         candidateIndex = [...this.pages.entries()]
+          .filter(([pageIndex]) => !this.requiredPageIndexes.has(pageIndex))
           .sort((left, right) => left[1].lastUsed - right[1].lastUsed)[0]?.[0]
       }
       if (candidateIndex === undefined) return
