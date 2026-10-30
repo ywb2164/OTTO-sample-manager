@@ -15,6 +15,7 @@
     "test": "vitest run",
     "build": "electron-vite build",
     "build:native": "powershell -NoProfile -ExecutionPolicy Bypass -File native/build.ps1",
+    "build:native:zig": "powershell -NoProfile -ExecutionPolicy Bypass -File native/build-zig.ps1",
     "pack": "npm run build:native && npm run build && electron-builder --win --x64",
     "preview": "electron-vite preview"
   },

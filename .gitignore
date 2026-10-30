@@ -10,6 +10,8 @@ out
 *.log*
 native/.build/
 native/*.exe
+native/otto-drag-helper-zig/zig-out/
+native/otto-drag-helper-zig/.zig-cache/
 tools/dnd-research/bin/
 tools/dnd-research/obj/
 tools/dnd-research/runtime/
